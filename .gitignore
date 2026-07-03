@@ -1,0 +1,51 @@
+# Ambiente / segredos
+.env
+.env.*
+!.env.example
+
+# Banco e dados (nunca versionar dados pessoais de carteira)
+data/lg_invest.db
+data/raw/*
+data/processed/*
+data/exports/*
+data/backups/*
+!data/**/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.eggs/
+build/
+dist/
+
+# Testes / qualidade
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# IDE / SO
+.vscode/
+.idea/
+.DS_Store
+
+# Ambientes virtuais Python
+.venv/
+.venv_check/
+venv/
+env/
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Arquivos de ambiente
+.env

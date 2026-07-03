@@ -1,0 +1,21 @@
+# LG INVEST - dependências do MVP (alternativa ao pyproject.toml)
+# Instale com: pip install -r requirements.txt
+# Para ferramentas de dev: pip install -r requirements-dev.txt
+
+sqlalchemy>=2.0,<2.1
+alembic>=1.13,<2.0
+pydantic>=2.6,<3.0
+pydantic-settings>=2.2,<3.0
+pandas>=2.2,<3.0
+numpy>=1.26,<3.0
+openpyxl>=3.1,<4.0
+yfinance>=0.2.40,<1.0
+streamlit>=1.34,<2.0
+plotly>=5.20,<6.0
+python-dotenv>=1.0,<2.0
+
+# Driver Postgres (Sprint 20 — migração para Supabase/PostgreSQL, ver
+# docs/SUPABASE_MIGRATION_PLAN.md). SQLite continua sendo o banco padrão
+# via DATABASE_URL em .env; este driver só é usado quando DATABASE_URL
+# aponta para postgresql+psycopg2://...
+psycopg2-binary>=2.9,<3.0

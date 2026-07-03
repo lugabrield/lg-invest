@@ -1,0 +1,4 @@
+ticker,name,asset_class,country,currency,sector
+WEGE3.SA,WEG,stock,BR,BRL,Industrial
+ITUB4.SA,Itaú Unibanco,stock,BR,BRL,Financials
+VOO,Vanguard S&P 500 ETF,etf,US,USD,ETF

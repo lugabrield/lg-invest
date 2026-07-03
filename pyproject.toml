@@ -1,0 +1,73 @@
+[project]
+name = "lg-invest"
+version = "0.1.0"
+description = "LG INVEST - Investment Intelligence Platform (MVP)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+
+# Dependências mínimas do MVP. Nada além do necessário para o setup + engines do MVP.
+# Engines financeiras e ETL ainda não são implementados neste sprint.
+dependencies = [
+    "sqlalchemy>=2.0,<2.1",
+    "alembic>=1.13,<2.0",
+    "pydantic>=2.6,<3.0",
+    "pydantic-settings>=2.2,<3.0",
+    "pandas>=2.2,<3.0",
+    "numpy>=1.26,<3.0",
+    "openpyxl>=3.1,<4.0",
+    "yfinance>=0.2.40,<1.0",
+    "streamlit>=1.34,<2.0",
+    "plotly>=5.20,<6.0",
+    "python-dotenv>=1.0,<2.0",
+    "psycopg2-binary>=2.9,<3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-cov>=5.0,<6.0",
+    "ruff>=0.5,<1.0",
+    "black>=24.0,<25.0",
+    "mypy>=1.10,<2.0",
+    "pre-commit>=3.7,<4.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
+# -------------------------------------------------------------------
+# Qualidade de código (Volume 14 e Volume 18)
+# -------------------------------------------------------------------
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = "database/migrations/versions"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["database/migrations/versions"]
+
+[tool.ruff.lint]
+# E/F: pyflakes+pycodestyle | I: isort | UP: pyupgrade | B: bugbear
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]  # line-length tratado pelo black
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+ignore_missing_imports = true
+# Tipagem estrita será exigida apenas em módulos críticos (engines) no futuro.
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["backend/app"]

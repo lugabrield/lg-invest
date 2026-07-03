@@ -1,0 +1,6 @@
+ticker,quantity,average_price,currency,opened_at
+WEGE3.SA,100,38.20,BRL,2025-06-01
+ZZZZ9,5,10.00,BRL,2025-01-01
+VOO,-3,420.50,USD,2025-03-15
+WEGE3.SA,50,40.00,BRL,2025-07-01
+ITUB4.SA,200,28.50,BRL,not-a-date

@@ -1,0 +1,14 @@
+{
+  "portfolio": {"name": "Carteira Brasil", "base_currency": "BRL"},
+  "assets": [
+    {"ticker": "WEGE3.SA", "name": "WEG", "asset_class": "stock", "country": "BR", "currency": "BRL", "sector": "Industrial"},
+    {"ticker": "ITUB4.SA", "name": "Itau", "asset_class": "stock", "country": "BR", "currency": "BRL", "sector": "Financials"},
+    {"ticker": "HGLG11.SA", "name": "CSHG Logistica", "asset_class": "fii", "country": "BR", "currency": "BRL", "sector": "FII"}
+  ],
+  "positions": [
+    {"ticker": "WEGE3.SA", "quantity": "100", "average_price": "38.00", "currency": "BRL", "opened_at": "2025-06-01"},
+    {"ticker": "ITUB4.SA", "quantity": "200", "average_price": "28.00", "currency": "BRL", "opened_at": "2025-04-10"},
+    {"ticker": "HGLG11.SA", "quantity": "50", "average_price": "160.00", "currency": "BRL", "opened_at": "2025-03-15"}
+  ],
+  "current_prices": {"WEGE3.SA": "40.00", "ITUB4.SA": "30.00", "HGLG11.SA": "155.00"}
+}

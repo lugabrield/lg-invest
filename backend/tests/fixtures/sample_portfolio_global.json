@@ -1,0 +1,12 @@
+{
+  "portfolio": {"name": "Carteira Global", "base_currency": "USD"},
+  "assets": [
+    {"ticker": "VOO", "name": "Vanguard S&P 500", "asset_class": "etf", "country": "US", "currency": "USD", "sector": "ETF"},
+    {"ticker": "AAPL", "name": "Apple", "asset_class": "stock", "country": "US", "currency": "USD", "sector": "Technology"}
+  ],
+  "positions": [
+    {"ticker": "VOO", "quantity": "10", "average_price": "420.00", "currency": "USD", "opened_at": "2025-03-15"},
+    {"ticker": "AAPL", "quantity": "15", "average_price": "180.00", "currency": "USD", "opened_at": "2025-05-20"}
+  ],
+  "current_prices": {"VOO": "450.00", "AAPL": "175.00"}
+}

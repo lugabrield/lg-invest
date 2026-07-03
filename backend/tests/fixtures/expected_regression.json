@@ -1,0 +1,34 @@
+{
+  "brazil": {
+    "portfolio": {
+      "total_value": "17750.00000000000000",
+      "total_cost": "17400.00000000000000",
+      "largest_position_ticker": "HGLG11.SA",
+      "positions": {
+        "WEGE3.SA": "4000.00000000000000",
+        "ITUB4.SA": "6000.00000000000000",
+        "HGLG11.SA": "7750.00000000000000"
+      }
+    },
+    "lg_scores": {
+      "WEGE3.SA": 55.2,
+      "ITUB4.SA": 55.2,
+      "HGLG11.SA": 53.5
+    }
+  },
+  "global": {
+    "portfolio": {
+      "total_value": "7125.00000000000000",
+      "total_cost": "6900.00000000000000",
+      "largest_position_ticker": "VOO",
+      "positions": {
+        "VOO": "4500.00000000000000",
+        "AAPL": "2625.00000000000000"
+      }
+    },
+    "lg_scores": {
+      "VOO": 58.8,
+      "AAPL": 55.2
+    }
+  }
+}
