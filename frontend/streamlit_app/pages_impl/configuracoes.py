@@ -6,6 +6,7 @@ internet; por isso são ações explícitas, com aviso e fallback visível.
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
 
 import streamlit as st
@@ -18,13 +19,22 @@ from frontend.streamlit_app.db import session_scope
 
 _FX_SOURCE_LABELS = {"bcb": "BCB (PTAX)", "yahoo": "Yahoo Finance", "manual": "Manual"}
 
+# Mascara usuário:senha em URLs de banco (ex.: postgresql+psycopg2://user:pass@host/db)
+# antes de exibir na tela — a URL real pode conter credenciais de produção
+# (Supabase) e esta tela é visível em qualquer app publicado (Sprint 20).
+_DB_URL_CREDENTIALS_RE = re.compile(r"://([^:/@]+):([^@/]+)@")
+
+
+def _redact_database_url(url: str) -> str:
+    return _DB_URL_CREDENTIALS_RE.sub(r"://\1:***@", url)
+
 
 def render(portfolio_id: int) -> None:
     st.title("Configurações")
 
     st.subheader("Ambiente")
     st.write(f"Ambiente: `{settings.environment}`")
-    st.write(f"Banco de dados: `{settings.database_url}`")
+    st.write(f"Banco de dados: `{_redact_database_url(settings.database_url)}`")
     st.write(f"Carteira ativa: `{portfolio_id}`")
 
     with session_scope() as db:
