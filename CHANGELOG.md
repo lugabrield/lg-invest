@@ -396,3 +396,25 @@ O formato segue, de forma simplificada, o padrão Keep a Changelog.
 ### Estado do plano de sprints (13-19 concluído)
 - Os 10 módulos do plano original (Market Data, Fundamentals, Valuation, Quality, Growth, Risk, Capital Reinvestment, LG Conviction Score, Decision Engine 2.0, Dashboard Intelligence) estão implementados e testados.
 - Migração para Supabase e deploy real continuam fora de escopo, aguardando aprovação explícita (Sprint 20, não iniciado).
+
+## [1.11.0] - Sprint 20 — Migração para Supabase/PostgreSQL (aprovado pelo usuário)
+
+### Adicionado
+- `psycopg2-binary` adicionado às dependências (`requirements.txt`, `pyproject.toml`) — driver Postgres, usado só quando `DATABASE_URL` aponta para `postgresql+psycopg2://...`.
+- `scripts/migrate_sqlite_to_postgres.py` — CLI de migração de dados (passo 5 de `docs/SUPABASE_MIGRATION_PLAN.md`): copia tabela por tabela do SQLite local para o Postgres de destino respeitando a ordem de dependência de FK (`Base.metadata.sorted_tables`), com modo dry-run por padrão, `--execute` para gravar de fato, `--wipe-target` para reexecuções idempotentes, e validação automática de contagem de linhas origem x destino ao final.
+
+### Executado (com aprovação explícita do usuário — "APROVADO")
+- Projeto Supabase criado pelo usuário; `alembic upgrade head` rodado contra o Postgres do Supabase (pooler em modo *session*, porta 5432) — cadeia completa de migrations aplicada, de `6ab223d94e49` até `c4d9e2a17f63`.
+- Dados migrados do SQLite local (`data/lg_invest.db`) para o Supabase via `scripts/migrate_sqlite_to_postgres.py --execute`, usando o pooler em modo *transaction* (porta 6543) para a cópia. Contagens confirmadas batendo em todas as 10 tabelas: 27 assets, 1 portfolio, 27 positions, 6622 prices, 4 recommendations (demais tabelas — decision_snapshots, fundamental_snapshots, investment_theses, journal_entries, thesis_reviews — vazias tanto na origem quanto no destino, esperado).
+
+### Notas técnicas (armadilhas encontradas durante a execução)
+- O hostname de conexão direta do Supabase (`db.<ref>.supabase.co:5432`) só resolve por IPv6 em projetos novos; em rede sem IPv6 funcional, a conexão falha com "could not translate host name to address". Solução: usar a **Connection Pooling** (Supavisor), que tem endereço IPv4 garantido — modo *session* (porta 5432) para migrations (DDL), modo *transaction* (porta 6543) para cópia de dados em lote.
+- No PowerShell, `set VAR=valor` não define uma variável de ambiente (é sintaxe do CMD) — o comando correto é `$env:VAR = "valor"`. Isso causou uma primeira tentativa de `alembic upgrade head` rodar silenciosamente contra o SQLite local em vez do Supabase.
+- O `--source` do script de migração usa `settings.database_url` (lido do ambiente) como padrão; como o `$env:DATABASE_URL` da etapa anterior (alembic) permanecia setado na mesma sessão do PowerShell, a primeira tentativa de migração copiou do Supabase para o próprio Supabase (ambos vazios). Corrigido passando `--source` explicitamente.
+
+### Segurança
+- A senha do banco Supabase foi compartilhada em texto puro durante a conversa (necessário para o usuário colar a Connection String) — recomendado ao usuário rotacionar essa senha em Project Settings → Database → Reset Password após a conclusão da migração.
+- `DATABASE_URL` real nunca foi escrita em nenhum arquivo versionado nem no `.env.example` — só usada via variável de ambiente/argumento de linha de comando nas sessões do usuário.
+
+### Pendente (mesmo Sprint 20, ainda não aprovado/executado)
+- Deploy real no Streamlit Community Cloud (`docs/DEPLOYMENT_PLAN.md`): requer `git init` + push para um repositório GitHub (não executável a partir do ambiente sandbox usado nesta sessão — sem suporte a operações de lock do git nesse mount) e criação do app + Secrets no Streamlit Cloud, ambos exigindo ação direta do usuário em suas próprias contas.
