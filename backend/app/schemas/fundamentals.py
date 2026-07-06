@@ -34,6 +34,15 @@ _RATIO_FIELDS = (
     "eps",
     "revenue_per_share",
     "beta",
+    "market_cap",
+    "enterprise_value",
+    "forward_pe",
+    "operating_margin",
+    "total_debt",
+    "total_cash",
+    "operating_cash_flow",
+    "gross_profit",
+    "shares_outstanding",
 )
 
 
@@ -64,6 +73,17 @@ class FundamentalSnapshotResult(BaseModel):
     eps: Decimal | None = None
     revenue_per_share: Decimal | None = None
     beta: Decimal | None = None
+
+    # Sprint 21 — campos adicionais de fundamentos (Fundamentals Foundation).
+    market_cap: Decimal | None = None
+    enterprise_value: Decimal | None = None
+    forward_pe: Decimal | None = None
+    operating_margin: Decimal | None = None
+    total_debt: Decimal | None = None
+    total_cash: Decimal | None = None
+    operating_cash_flow: Decimal | None = None
+    gross_profit: Decimal | None = None
+    shares_outstanding: Decimal | None = None
 
     model_config = {"from_attributes": True}
 

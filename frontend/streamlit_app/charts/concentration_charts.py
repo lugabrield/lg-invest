@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 
 from backend.app.engines.portfolio_diagnostics import thresholds as t
 from backend.app.schemas.dashboard_view import ConvertedPosition
+from frontend.streamlit_app.charts._theme import apply_dark_layout
 from frontend.streamlit_app.styles.theme import ALERT, ATTENTION, POSITIVE
 
 
@@ -52,4 +53,4 @@ def chart_concentration_by_asset(positions: list[ConvertedPosition], top_n: int 
         height=max(320, 28 * len(ranked)),
         xaxis_title="%",
     )
-    return fig
+    return apply_dark_layout(fig)

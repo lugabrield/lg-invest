@@ -20,11 +20,21 @@ def _snapshot(**kwargs) -> FundamentalSnapshotResult:
     return FundamentalSnapshotResult(**base)
 
 
-def test_not_applicable_class_is_indeterminate():
+def test_crypto_risk_is_policy_high():
+    """Sprint 21: cripto é classificada 'alto' por política da metodologia
+    (não por indicador ausente) — ver docs/QUALITY_GROWTH_RISK_ENGINES.md."""
     engine = RiskEngine()
     result = engine.evaluate("BTC-USD", "crypto", None)
+    assert result.classification == "alto"
+    assert result.confidence == "alta"
+    assert "política" in result.reason
+
+
+def test_not_applicable_class_is_indeterminate():
+    engine = RiskEngine()
+    result = engine.evaluate("LFT-2029", "bond", None)
     assert result.classification == "indeterminado"
-    assert "crypto" in result.reason
+    assert "bond" in result.reason
 
 
 def test_class_without_bands_is_indeterminate():

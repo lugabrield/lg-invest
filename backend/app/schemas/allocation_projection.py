@@ -36,4 +36,12 @@ class AllocationProjection(BaseModel):
     by_group: list[WeightComparison]  # classe/grupo (Ações BR, FIIs, ...), pesos antes e depois
     by_currency: list[WeightComparison]  # BRL, USD, pesos antes e depois
 
+    # Sprint 21 — impacto na concentração e na exposição internacional,
+    # mesma fórmula de `engines/portfolio/concentration.py` (HHI),
+    # reaplicada aos pesos por ticker projetados após o aporte.
+    concentration_hhi_before: Decimal = Decimal("0")
+    concentration_hhi_after: Decimal = Decimal("0")
+    international_weight_before: Decimal = Decimal("0")  # fração 0..1, moedas != BRL
+    international_weight_after: Decimal = Decimal("0")
+
     model_config = {"from_attributes": True}

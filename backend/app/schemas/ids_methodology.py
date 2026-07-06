@@ -55,6 +55,12 @@ class ConvictionScoreResult(BaseModel):
     confidence: Decimal  # 0..1
     confidence_label: str
     classification: str
+    """Uma de: strong_buy | buy | hold | watch | avoid | insufficient_data
+    (ver `frontend/streamlit_app/styles/theme.py::CLASSIFICATION_LABELS_PT`
+    para o rótulo em português exibido na UI)."""
+    recommendation_hint: str = ""
+    """Frase curta explicando a classificação — sempre menciona a confiança
+    quando ela é baixa (Sprint 21), nunca sugere aporte com dado insuficiente."""
     model_version: str
     explanation: list[ConvictionPillarResult]
 

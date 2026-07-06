@@ -42,3 +42,14 @@ class FundamentalData(BaseModel):
     eps: Decimal | None = None
     revenue_per_share: Decimal | None = None
     beta: Decimal | None = None
+
+    # Sprint 21 — campos adicionais de fundamentos (Fundamentals Foundation).
+    market_cap: Decimal | None = None
+    enterprise_value: Decimal | None = None
+    forward_pe: Decimal | None = None
+    operating_margin: Decimal | None = None
+    total_debt: Decimal | None = None
+    total_cash: Decimal | None = None
+    operating_cash_flow: Decimal | None = None
+    gross_profit: Decimal | None = None
+    shares_outstanding: Decimal | None = None

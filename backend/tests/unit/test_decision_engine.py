@@ -83,7 +83,11 @@ def test_low_confidence_triggers_alert():
     ]
     result = recommend(low_conf, Decimal("1000"))
     assert result.confidence_label == "Baixa"
-    assert any("Confiança baixa" in a for a in result.alerts)
+    # Sprint 21: alerta passou a nomear os tickers afetados em vez de um
+    # aviso genérico — ver decision/engine.py::_build_alerts.
+    assert any(
+        "baixa confiança" in a and "WEGE3.SA" in a and "ITUB4.SA" in a for a in result.alerts
+    )
 
 
 def test_audit_log_is_complete():

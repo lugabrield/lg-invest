@@ -10,9 +10,10 @@ from __future__ import annotations
 import plotly.graph_objects as go
 
 from backend.app.schemas.intelligence_dashboard import AssetIntelligence
-from frontend.streamlit_app.styles.theme import NEGATIVE, POSITIVE
+from frontend.streamlit_app.charts._theme import apply_dark_layout
+from frontend.streamlit_app.styles.theme import NEGATIVE, NEUTRAL, POSITIVE
 
-_NEUTRAL = "#8A93A3"
+_NEUTRAL = NEUTRAL
 
 
 def chart_conviction_by_asset(assets: list[AssetIntelligence]) -> go.Figure:
@@ -50,4 +51,4 @@ def chart_conviction_by_asset(assets: list[AssetIntelligence]) -> go.Figure:
         xaxis_title="Score (0-100)",
         xaxis_range=[0, 105],
     )
-    return fig
+    return apply_dark_layout(fig)

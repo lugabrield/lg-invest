@@ -32,6 +32,11 @@ class Position(Base, TimestampMixin):
     average_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     opened_at: Mapped[date] = mapped_column(Date, nullable=False)
+    # Origem da posição (Sprint 23): None para posições criadas manualmente
+    # ou importadas por CSV; "dividendos_me:b3"/"dividendos_me:international"
+    # quando vieram da sincronização com o Dividendos.me. Só rastreabilidade —
+    # nenhum engine depende deste campo para calcular nada.
+    source: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     portfolio: Mapped[Portfolio] = relationship(  # noqa: F821
         "Portfolio", back_populates="positions"

@@ -13,7 +13,10 @@ import types
 from datetime import date
 from decimal import Decimal
 
-from backend.app.etl.providers.yahoo_fundamentals_provider import YahooFundamentalsProvider
+from backend.app.etl.providers.yahoo_fundamentals_provider import (
+    YahooFundamentalsProvider,
+    _normalize_percentage,
+)
 
 
 class _FakeLoc:
@@ -135,3 +138,62 @@ def test_get_history_empty_when_no_income_statement(monkeypatch):
     _install_fake_yfinance(monkeypatch, _NoFinancialsTicker)
     provider = YahooFundamentalsProvider()
     assert provider.get_history("NOPE9.SA") == []
+
+
+# --- Normalização de percentuais (Sprint 22 — BTLG11 exibindo Dividend Yield de 950%) ---
+
+
+def test_normalize_percentage_passes_through_fraction_scale():
+    assert _normalize_percentage(Decimal("0.095")) == Decimal("0.095")
+
+
+def test_normalize_percentage_divides_percentage_scale_value():
+    assert _normalize_percentage(Decimal("9.5")) == Decimal("0.095")
+
+
+def test_normalize_percentage_none_stays_none():
+    assert _normalize_percentage(None) is None
+
+
+def test_normalize_percentage_boundary_at_one_is_not_divided():
+    # Exatamente 100% (fração 1) é o limite: continua tratado como fração já correta.
+    assert _normalize_percentage(Decimal("1")) == Decimal("1")
+
+
+def test_normalize_percentage_handles_negative_values():
+    assert _normalize_percentage(Decimal("-9.5")) == Decimal("-0.095")
+
+
+def test_get_latest_normalizes_percentage_scale_dividend_yield(monkeypatch):
+    """Reproduz o bug real do Sprint 22: BTLG11 (FII) com dividendYield=9.5 do
+    yfinance (já em escala percentual) deve virar fração 0,095 (9,5%), não 9,5 (950%)."""
+
+    class _PercentScaleTicker:
+        def __init__(self, symbol):
+            self.info = {
+                "dividendYield": 9.5,
+                "payoutRatio": 0.4,
+                "returnOnEquity": 0.28,
+                "mostRecentQuarter": 1735689600,
+            }
+
+    _install_fake_yfinance(monkeypatch, _PercentScaleTicker)
+    provider = YahooFundamentalsProvider()
+    data = provider.get_latest("BTLG11.SA")
+
+    assert data is not None
+    assert data.dividend_yield == Decimal("0.095")
+    # Campos já em fração não devem ser distorcidos pela normalização.
+    assert data.payout_ratio == Decimal("0.4")
+    assert data.roe == Decimal("0.28")
+
+
+def test_get_latest_does_not_distort_fraction_scale_margins(monkeypatch):
+    _install_fake_yfinance(monkeypatch)
+    provider = YahooFundamentalsProvider()
+    data = provider.get_latest("WEGE3.SA")
+
+    assert data is not None
+    assert data.net_margin == Decimal("0.18")
+    assert data.ebitda_margin == Decimal("0.30")
+    assert data.dividend_yield == Decimal("0.03")

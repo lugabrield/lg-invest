@@ -214,6 +214,61 @@ def test_price_source_manual_when_flagged(db_session):
     assert "TESOURO-IPCA-2050" not in view.estimated_price_tickers
 
 
+def test_price_source_manual_when_asset_flagged_is_manual_without_any_price(db_session):
+    """Sprint 22: TESOURO-IPCA-2050 com `asset.is_manual=True` mas sem
+    nenhuma linha de Price ainda deve aparecer como 'manual', nunca
+    como 'estimado'/'ausente' — reproduz o bug relatado pelo usuário."""
+    portfolio = Portfolio(name="Carteira manual", base_currency="BRL")
+    db_session.add(portfolio)
+    db_session.flush()
+
+    tesouro = Asset(
+        ticker="TESOURO-IPCA-2050",
+        name="Tesouro IPCA+ 2050",
+        asset_class="bond",
+        country="BR",
+        currency="BRL",
+        is_manual=True,
+    )
+    db_session.add(tesouro)
+    db_session.flush()
+    db_session.add(
+        Position(
+            portfolio_id=portfolio.id,
+            asset_id=tesouro.id,
+            quantity=Decimal("5000"),
+            average_price=Decimal("1.10"),
+            currency="BRL",
+            opened_at=date(2025, 1, 1),
+        )
+    )
+    db_session.commit()
+
+    view = build_dashboard_view(db_session, portfolio.id, exchange_rate=Decimal("5"))
+    tesouro_pos = next(p for p in view.positions if p.ticker == "TESOURO-IPCA-2050")
+
+    assert tesouro_pos.price_source == "manual"
+    assert tesouro_pos.is_price_estimated is False
+    assert "TESOURO-IPCA-2050" in view.manual_price_tickers
+    assert "TESOURO-IPCA-2050" not in view.estimated_price_tickers
+
+
+def test_price_source_manual_when_asset_flagged_is_manual_with_yahoo_source_price(db_session):
+    """`asset.is_manual=True` tem prioridade mesmo se, por algum motivo
+    histórico, existir uma linha de Price com source diferente de 'manual'."""
+    portfolio_id = _seed_multi_currency_portfolio(db_session)
+
+    tesouro = db_session.query(Asset).filter(Asset.ticker == "TESOURO-IPCA-2050").one()
+    tesouro.is_manual = True
+    db_session.add(Price(asset_id=tesouro.id, date=date(2026, 6, 28), close=Decimal("1.15")))
+    db_session.commit()
+
+    view = build_dashboard_view(db_session, portfolio_id, exchange_rate=Decimal("5"))
+    tesouro_pos = next(p for p in view.positions if p.ticker == "TESOURO-IPCA-2050")
+    assert tesouro_pos.price_source == "manual"
+    assert "TESOURO-IPCA-2050" in view.manual_price_tickers
+
+
 def test_total_return_pct_and_cost(db_session):
     portfolio_id = _seed_multi_currency_portfolio(db_session)
     view = build_dashboard_view(db_session, portfolio_id, exchange_rate=Decimal("5"))
@@ -223,3 +278,75 @@ def test_total_return_pct_and_cost(db_session):
     assert view.total_return_pct == pytest.approx(
         (view.total_converted_brl - view.total_cost_brl) / view.total_cost_brl
     )
+
+
+def _seed_btc_position(db) -> int:
+    """BTC-USD com quantidade/preço reais confirmados pelo usuário na
+    correção da Sprint 24 (regressão contra `currency="BRL"` incorreta)."""
+    portfolio = Portfolio(name="Carteira com BTC", base_currency="BRL")
+    db.add(portfolio)
+    db.flush()
+
+    btc = Asset(
+        ticker="BTC-USD", name="Bitcoin", asset_class="crypto", country="US", currency="USD"
+    )
+    db.add(btc)
+    db.flush()
+
+    db.add(
+        Position(
+            portfolio_id=portfolio.id,
+            asset_id=btc.id,
+            quantity=Decimal("0.00584925"),
+            average_price=Decimal("76308.58"),
+            currency="USD",
+            opened_at=date(2025, 1, 1),
+        )
+    )
+    db.add(Price(asset_id=btc.id, date=date(2026, 6, 27), close=Decimal("63121.45")))
+    db.commit()
+    return portfolio.id
+
+
+def test_btc_usd_converted_to_brl_using_exchange_rate(db_session):
+    """Sprint 24: BTC-USD deve ser convertido para BRL como qualquer outro
+    ativo em USD (mesma lógica que já funciona para VOO) — não deve ser
+    tratado como se o valor já estivesse em BRL."""
+    portfolio_id = _seed_btc_position(db_session)
+    view = build_dashboard_view(db_session, portfolio_id, exchange_rate=Decimal("5"))
+
+    btc_pos = next(p for p in view.positions if p.ticker == "BTC-USD")
+    assert btc_pos.currency == "USD"
+    assert btc_pos.current_price == Decimal("63121.45")
+
+    # 0.00584925 * 63121.45 ~= 369.18 USD
+    expected_value_usd = Decimal("0.00584925") * Decimal("63121.45")
+    assert view.total_usd == expected_value_usd
+    assert view.total_brl == Decimal("0")
+
+    # Convertido para BRL usando o câmbio (5.00): ~369.18 * 5 = ~1845.90
+    expected_value_brl = expected_value_usd * Decimal("5")
+    assert view.total_converted_brl == expected_value_brl
+
+
+def test_btc_not_undervalued_as_if_already_in_brl(db_session):
+    """Regressão-alvo: antes da correção, BTC vinha com `currency="BRL"` e
+    por isso NUNCA passava pela multiplicação por câmbio em `to_brl` —
+    um valor de ~R$ 366 (na verdade US$ 366) ficava subavaliado ~5x."""
+    portfolio_id = _seed_btc_position(db_session)
+    view = build_dashboard_view(db_session, portfolio_id, exchange_rate=Decimal("5"))
+
+    # Se a moeda ainda fosse tratada como BRL, total_converted_brl seria
+    # ~369.18 (sem multiplicar pelo câmbio). Com a correção, deve ser ~5x maior.
+    assert view.total_converted_brl > Decimal("1800")
+    assert view.total_converted_brl < Decimal("1900")
+
+
+def test_btc_currency_exposure_counts_as_usd(db_session):
+    portfolio_id = _seed_btc_position(db_session)
+    view = build_dashboard_view(db_session, portfolio_id, exchange_rate=Decimal("5"))
+
+    exposure_by_currency = {c.currency: c for c in view.currency_exposure}
+    assert "USD" in exposure_by_currency
+    assert "BRL" not in exposure_by_currency
+    assert exposure_by_currency["USD"].weight == pytest.approx(Decimal("1"))

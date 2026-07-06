@@ -12,6 +12,7 @@ from decimal import Decimal
 import plotly.graph_objects as go
 
 from backend.app.schemas.dashboard_view import ConvertedPosition, CurrencyExposure, DashboardView
+from frontend.streamlit_app.charts._theme import apply_dark_layout
 from frontend.streamlit_app.styles.theme import CURRENCY_COLORS, GROUP_COLORS, color_for
 
 _ZERO = Decimal("0")
@@ -36,7 +37,7 @@ def _donut(labels: list[str], values: list[float], colors: list[str], title: str
         legend=dict(orientation="h", yanchor="bottom", y=-0.15),
         height=340,
     )
-    return fig
+    return apply_dark_layout(fig)
 
 
 def chart_allocation_by_class(positions: list[ConvertedPosition]) -> go.Figure:
@@ -100,7 +101,7 @@ def chart_brazil_vs_international(currency_exposure: list[CurrencyExposure]) -> 
         legend=dict(orientation="h", yanchor="bottom", y=-0.4),
         xaxis_title="R$",
     )
-    return fig
+    return apply_dark_layout(fig)
 
 
 def chart_brl_usd_comparison(view: DashboardView) -> go.Figure:
@@ -124,4 +125,4 @@ def chart_brl_usd_comparison(view: DashboardView) -> go.Figure:
         yaxis_title="R$",
         showlegend=False,
     )
-    return fig
+    return apply_dark_layout(fig)

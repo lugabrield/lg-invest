@@ -19,3 +19,10 @@ python-dotenv>=1.0,<2.0
 # via DATABASE_URL em .env; este driver só é usado quando DATABASE_URL
 # aponta para postgresql+psycopg2://...
 psycopg2-binary>=2.9,<3.0
+
+# Sincronização com o Dividendos.me (Sprint 23, uso recomendado só local
+# — ver docs/DIVIDENDOS_ME_INTEGRATION.md). Depois de instalar, rode
+# `playwright install chromium` uma vez para baixar o navegador. No
+# Streamlit Cloud o pacote pode estar ausente/instável de propósito: a
+# tela detecta isso e desabilita os botões de sincronização automaticamente.
+playwright>=1.44,<2.0

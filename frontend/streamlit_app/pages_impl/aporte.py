@@ -19,9 +19,11 @@ from backend.app.services import fx_settings_service
 from backend.app.services.allocation_projection_service import build_allocation_projection
 from backend.app.services.dashboard_view_service import build_dashboard_view
 from backend.app.services.decision_service import DecisionService
+from frontend.streamlit_app.charts._theme import apply_dark_layout
 from frontend.streamlit_app.components.sections import section
 from frontend.streamlit_app.db import session_scope
 from frontend.streamlit_app.formatting import format_brl, format_pct
+from frontend.streamlit_app.styles.theme import NEUTRAL, PRIMARY
 
 
 def _before_after_chart(comparisons: list[WeightComparison], title: str) -> go.Figure:
@@ -33,14 +35,14 @@ def _before_after_chart(comparisons: list[WeightComparison], title: str) -> go.F
                 y=labels,
                 x=[float(c.weight_before) * 100 for c in comparisons],
                 orientation="h",
-                marker_color="#8A93A3",
+                marker_color=NEUTRAL,
             ),
             go.Bar(
                 name="Depois",
                 y=labels,
                 x=[float(c.weight_after) * 100 for c in comparisons],
                 orientation="h",
-                marker_color="#1F6FEB",
+                marker_color=PRIMARY,
             ),
         ]
     )
@@ -51,7 +53,7 @@ def _before_after_chart(comparisons: list[WeightComparison], title: str) -> go.F
         height=max(280, 40 * len(labels)),
         xaxis_title="%",
     )
-    return fig
+    return apply_dark_layout(fig)
 
 
 def render(portfolio_id: int) -> None:
@@ -66,14 +68,19 @@ def render(portfolio_id: int) -> None:
 
     amount = st.number_input("Valor do aporte (R$)", min_value=0.0, value=1000.0, step=100.0)
     blocked = st.multiselect("Ativos bloqueados (opcional)", tickers)
-    use_v2 = st.checkbox(
-        "Usar Decision Engine 2.0 (LG Conviction Score + alocação-alvo)",
-        value=False,
+    engine_version = st.radio(
+        "Motor de recomendação",
+        options=["v1", "v2", "v3"],
+        index=0,
+        horizontal=True,
         help=(
-            "v2 prioriza o LG Conviction Score (Sprint 17) no lugar do LG Score puro quando "
-            "calculável, e dá bônus a classes subalocadas em relação à meta configurada em "
-            "Configurações. Sem meta configurada, o bônus de classe não se aplica a nenhum "
-            "ativo. v1 (padrão) continua disponível e inalterado."
+            "v1: LG Score + gap de alocação por classe + concentração (padrão, inalterado). "
+            "v2: prioriza o LG Conviction Score quando calculável, com bônus por classe "
+            "subalocada em relação à meta configurada em Configurações. "
+            "v3 (Fase 4): score multi-fator (fundamentos + alocação-alvo multi-dimensão + "
+            "concentração + internacionalização, escalado pela confiança do dado) e respeita "
+            "os bloqueios da Política de Investimento e da Alocação-alvo detalhada — nenhuma "
+            "versão jamais recomenda venda, apenas pausa aporte."
         ),
     )
     persist = st.checkbox("Salvar recomendação (auditoria)", value=True)
@@ -88,7 +95,11 @@ def render(portfolio_id: int) -> None:
     with session_scope() as db:
         view_before = build_dashboard_view(db, portfolio_id, exchange_rate)
         service = DecisionService(db)
-        recommend_fn = service.recommend_v2 if use_v2 else service.recommend
+        recommend_fn = {
+            "v1": service.recommend,
+            "v2": service.recommend_v2,
+            "v3": service.recommend_v3,
+        }[engine_version]
         result = recommend_fn(
             portfolio_id,
             Decimal(str(amount)),
@@ -125,8 +136,13 @@ def render(portfolio_id: int) -> None:
                                     else "—"
                                 )
                             }
-                            if use_v2
+                            if engine_version in ("v2", "v3")
                             else {}
+                        ),
+                        "Confiança do dado": (
+                            f"{float(i.item_confidence) * 100:.0f}%"
+                            if i.item_confidence is not None
+                            else "—"
                         ),
                     }
                     for i in result.items
@@ -136,7 +152,12 @@ def render(portfolio_id: int) -> None:
             )
             with st.expander("Justificativa por ativo"):
                 for i in result.items:
-                    st.markdown(f"**{i.ticker}** — {format_brl(i.amount)}")
+                    confidence_note = (
+                        f" (confiança do dado: {float(i.item_confidence) * 100:.0f}%)"
+                        if i.item_confidence is not None
+                        else ""
+                    )
+                    st.markdown(f"**{i.ticker}** — {format_brl(i.amount)}{confidence_note}")
                     for reason in i.reasons:
                         st.caption(f"· {reason}")
 
@@ -158,16 +179,29 @@ def render(portfolio_id: int) -> None:
             col1.metric("Patrimônio antes", format_brl(projection.total_before_brl))
             col2.metric("Patrimônio depois", format_brl(projection.total_after_brl))
 
+            col3, col4 = st.columns(2)
+            hhi_delta = float(
+                projection.concentration_hhi_after - projection.concentration_hhi_before
+            )
+            col3.metric(
+                "Concentração (HHI)",
+                f"{float(projection.concentration_hhi_after):.3f}",
+                delta=f"{hhi_delta:+.3f}",
+                delta_color="inverse",
+                help="Índice de Herfindahl-Hirschman: quanto menor, mais diversificada a "
+                "carteira. Delta negativo = aporte reduziu a concentração.",
+            )
+            intl_delta = float(
+                projection.international_weight_after - projection.international_weight_before
+            )
+            col4.metric(
+                "Exposição internacional",
+                format_pct(projection.international_weight_after),
+                delta=f"{intl_delta * 100:+.2f} p.p.",
+                help="Fração do patrimônio em moedas diferentes de BRL, antes x depois do aporte.",
+            )
+
             st.plotly_chart(
                 _before_after_chart(projection.by_group, "Peso por classe: antes x depois"),
                 use_container_width=True,
-            )
-            st.plotly_chart(
-                _before_after_chart(projection.by_currency, "Peso por moeda: antes x depois"),
-                use_container_width=True,
-            )
-
-            st.caption(
-                "Simplificação: o valor do aporte é somado ao valor já convertido da posição "
-                "recomendada — não simula custos de câmbio nem a compra em moeda estrangeira."
             )

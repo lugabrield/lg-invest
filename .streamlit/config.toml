@@ -1,0 +1,23 @@
+# Tema fixo da LG INVEST (Sprint 21).
+#
+# Antes deste arquivo, o Streamlit escolhia dark/light com base na
+# preferência do navegador de quem visitava o app. O CSS em
+# frontend/streamlit_app/styles/custom_css.py sempre assumiu fundo claro
+# nos cards; em visitantes com preferência dark, o texto nativo do
+# Streamlit (não coberto pelo CSS customizado, ex.: labels de widgets,
+# texto de tabelas) virava claro sobre fundo claro — o bug de contraste
+# relatado. Fixar o tema aqui garante que todo o app (nativo + CSS
+# customizado) usa a mesma paleta dark, independente do visitante.
+#
+# As cores abaixo devem bater com frontend/streamlit_app/styles/theme.py.
+
+[theme]
+base = "dark"
+primaryColor = "#3B82F6"
+backgroundColor = "#0B0F17"
+secondaryBackgroundColor = "#151A24"
+textColor = "#E9EDF4"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false

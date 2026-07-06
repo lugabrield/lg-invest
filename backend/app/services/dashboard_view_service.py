@@ -52,29 +52,40 @@ def _group_label(asset_class: str, currency: str) -> str:
     return _GROUP_LABELS.get((asset_class, currency), f"{asset_class.title()} ({currency})")
 
 
-def _load_price_rows(db: Session, portfolio_id: int) -> dict[str, Price | None]:
+def _load_price_rows(
+    db: Session, portfolio_id: int
+) -> tuple[dict[str, Price | None], dict[str, bool]]:
     positions = PositionRepository(db).list_by_portfolio(portfolio_id)
     assets = AssetRepository(db)
     prices = PriceRepository(db)
 
     latest_by_ticker: dict[str, Price | None] = {}
+    is_manual_by_ticker: dict[str, bool] = {}
     for position in positions:
         asset = assets.get_by_id(position.asset_id)
         if asset is None:
             continue
         latest_by_ticker[asset.ticker] = prices.get_latest(asset.id)
-    return latest_by_ticker
+        is_manual_by_ticker[asset.ticker] = asset.is_manual
+    return latest_by_ticker, is_manual_by_ticker
 
 
 def build_dashboard_view(db: Session, portfolio_id: int, exchange_rate: Decimal) -> DashboardView:
     raw_inputs = PortfolioService(db).build_inputs(portfolio_id)
-    latest_price_by_ticker = _load_price_rows(db, portfolio_id)
+    latest_price_by_ticker, is_manual_by_ticker = _load_price_rows(db, portfolio_id)
 
     estimated_tickers: list[str] = []
     adjusted_inputs = []
     for position_input in raw_inputs:
+        # Ativo manual (ex.: Tesouro Direto) sem nenhuma linha de Price ainda
+        # não deve virar "estimado" (preço médio como aproximação) — deve
+        # continuar sinalizado como "manual" mais abaixo, mesmo que o valor
+        # de exibição também caia no preço médio na ausência de cotação
+        # própria. A lista `estimated_tickers` (usada pelo aviso amarelo do
+        # Dashboard) é reservada para ativos automáticos sem cotação.
         if position_input.current_price is None:
-            estimated_tickers.append(position_input.ticker)
+            if not is_manual_by_ticker.get(position_input.ticker, False):
+                estimated_tickers.append(position_input.ticker)
             adjusted_inputs.append(
                 replace(position_input, current_price=position_input.average_price)
             )
@@ -106,9 +117,18 @@ def build_dashboard_view(db: Session, portfolio_id: int, exchange_rate: Decimal)
         value_brl = converted_values[p.ticker]
         weight = (value_brl / total_converted) if total_converted > 0 else _ZERO
         is_estimated = p.ticker in estimated_tickers
+        is_manual_asset = is_manual_by_ticker.get(p.ticker, False)
 
         latest_price = latest_price_by_ticker.get(p.ticker)
-        if is_estimated:
+        if is_manual_asset:
+            # Ativo marcado como manual (ex.: Tesouro Direto) tem prioridade
+            # sobre qualquer outra inferência: nunca "estimado" nem "ausente",
+            # mesmo que ainda não tenha uma linha de Price salva — mesma
+            # convenção de `pages_impl/ativos.py::_price_status`.
+            price_source = "manual"
+            price_updated_at = latest_price.updated_at if latest_price is not None else None
+            manual_tickers.append(p.ticker)
+        elif is_estimated:
             price_source = "estimated"
             price_updated_at = None
         elif latest_price is not None and latest_price.source == "manual":

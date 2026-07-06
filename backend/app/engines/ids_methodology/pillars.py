@@ -30,7 +30,7 @@ from backend.app.engines.lg_score.pillars import growth_pillar as _lg_growth_pil
 from backend.app.engines.lg_score.pillars import quality_pillar as _lg_quality_pillar
 from backend.app.engines.lg_score.pillars import risk_pillar as _lg_risk_pillar
 from backend.app.engines.lg_score.pillars import valuation_pillar as _lg_valuation_pillar
-from backend.app.schemas.fundamentals import FundamentalSnapshotResult
+from backend.app.schemas.capital_reinvestment import ReinvestmentResult
 from backend.app.schemas.growth import GrowthResult
 from backend.app.schemas.quality import QualityResult
 from backend.app.schemas.risk import RiskResult
@@ -39,12 +39,6 @@ from backend.app.schemas.valuation import ValuationResult
 # Mesmo contrato de entrada do LG Score: os dois métodos consomem
 # exatamente o mesmo dado de preço (classe do ativo + histórico).
 IdsScoreInput = ScoreInput
-
-# Classes com pilar de reinvestimento aplicável (equity puro). FIIs/REITs
-# são obrigados por regulação a distribuir a maior parte do resultado —
-# payout baixo não indicaria disciplina de reinvestimento, indicaria
-# não conformidade — por isso ficam fora deste pilar por ora.
-_CAPITAL_REINVESTMENT_CLASSES = ("stock", "etf")
 
 _CONFIDENCE_BY_LABEL = {"alta": Decimal("0.9"), "média": Decimal("0.6"), "baixa": Decimal("0.3")}
 
@@ -198,34 +192,38 @@ def valuation_pillar_v2(
 
 
 def capital_reinvestment_pillar_v2(
-    asset_class: str, snapshot: FundamentalSnapshotResult | None
+    asset_class: str, reinvestment_result: ReinvestmentResult | None
 ) -> PillarScore:
-    """Reinvestimento de capital v2: taxa de retenção (1 − payout ratio).
+    """Reinvestimento de capital v2: usa o Capital Reinvestment Engine (Sprint 21).
 
-    Só aplicável a `stock`/`etf` (ver módulo). Preferência por maior
-    retenção reflete o perfil de longo prazo do investidor documentado
-    em `profile.py`, não uma regra universal de "melhor"/"pior".
+    Só aplicável a `stock`/`etf` (`engines/capital_reinvestment/thresholds.py`).
+    Preferência por maior retenção reflete o perfil de longo prazo do
+    investidor documentado em `profile.py`, não uma regra universal de
+    "melhor"/"pior". Usa `reinvestment_result.score` diretamente quando
+    disponível (métrica contínua, mais granular que os buckets fixos dos
+    outros pilares).
     """
-    if asset_class not in _CAPITAL_REINVESTMENT_CLASSES:
+    if reinvestment_result is None or reinvestment_result.classification in (
+        "nao_aplicavel",
+        "indeterminado",
+    ):
+        reason = (
+            reinvestment_result.reason
+            if reinvestment_result is not None
+            else "Capital Reinvestment Engine não avaliado"
+        )
         return PillarScore(
             score=NEUTRAL,
             confidence=Decimal("0.1"),
-            reasons=[f"reinvestimento de capital não aplicável à classe '{asset_class}'"],
+            reasons=[f"dado ausente ou não aplicável ({reason}); usada neutralidade (50)"],
         )
 
-    if snapshot is None or snapshot.payout_ratio is None:
-        return PillarScore(
-            score=NEUTRAL,
-            confidence=Decimal("0.1"),
-            reasons=["dado ausente: payout ratio indisponível; usada neutralidade (50)"],
-        )
-
-    retention = Decimal("1") - snapshot.payout_ratio
-    score = clamp_score(Decimal("50") + retention * Decimal("50"))
-    reasons = [
-        f"payout ratio: {snapshot.payout_ratio * 100:.1f}% -> retenção estimada "
-        f"{retention * 100:.1f}% -> nota {score:.1f}",
-        "prioriza retenção/reinvestimento sobre distribuição imediata, "
-        "conforme o perfil de longo prazo do investidor",
+    score = (
+        clamp_score(reinvestment_result.score) if reinvestment_result.score is not None else NEUTRAL
+    )
+    reasons = [f"Capital Reinvestment Engine: {reinvestment_result.classification}"]
+    reasons += [
+        f"{m.label}: {m.reason}" if m.reason else f"{m.label}: {m.verdict}"
+        for m in reinvestment_result.metrics
     ]
     return PillarScore(score=score, confidence=Decimal("0.7"), reasons=reasons)

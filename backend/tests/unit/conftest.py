@@ -14,6 +14,8 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.infrastructure.database.base import Base
 from backend.app.infrastructure.database.models import (  # noqa: F401
     Asset,
+    IncomeEvent,
+    IncomeMonthlySummary,
     JournalEntry,
     Portfolio,
     Position,

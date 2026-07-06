@@ -17,6 +17,7 @@ PAGE_MODULES = [
     "frontend.streamlit_app.pages_impl.ativos",
     "frontend.streamlit_app.pages_impl.inteligencia",
     "frontend.streamlit_app.pages_impl.aporte",
+    "frontend.streamlit_app.pages_impl.simulacao",
     "frontend.streamlit_app.pages_impl.journal",
     "frontend.streamlit_app.pages_impl.configuracoes",
 ]

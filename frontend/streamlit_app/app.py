@@ -31,6 +31,8 @@ from frontend.streamlit_app.pages_impl import (  # noqa: E402
     dashboard,
     inteligencia,
     journal,
+    simulacao,
+    sincronizar_dividendos_me,
 )
 from frontend.streamlit_app.styles.custom_css import inject_custom_css  # noqa: E402
 
@@ -40,7 +42,9 @@ PAGES = [
     "Ativos",
     "Inteligência",
     "Aporte",
+    "Simulação",
     "Journal",
+    "Sincronizar Dividendos.me",
     "Configurações",
 ]
 
@@ -64,8 +68,12 @@ def main() -> None:
         inteligencia.render(int(portfolio_id))
     elif page == "Aporte":
         aporte.render(int(portfolio_id))
+    elif page == "Simulação":
+        simulacao.render(int(portfolio_id))
     elif page == "Journal":
         journal.render()
+    elif page == "Sincronizar Dividendos.me":
+        sincronizar_dividendos_me.render(int(portfolio_id))
     elif page == "Configurações":
         configuracoes.render(int(portfolio_id))
 

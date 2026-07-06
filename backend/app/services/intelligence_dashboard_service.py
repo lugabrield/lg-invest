@@ -53,6 +53,7 @@ def _to_asset_intelligence(
         growth=conviction.growth,
         risk=conviction.risk,
         capital_reinvestment=conviction.capital_reinvestment,
+        recommendation_hint=conviction.recommendation_hint,
         explanation=conviction.explanation,
     )
 

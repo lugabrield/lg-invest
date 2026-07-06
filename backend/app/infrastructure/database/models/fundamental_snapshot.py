@@ -67,6 +67,19 @@ class FundamentalSnapshot(Base, TimestampMixin):
     revenue_per_share: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     beta: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
 
+    # Sprint 21 — campos adicionais de fundamentos (Fundamentals Foundation).
+    # Todos nullable pela mesma regra dos campos acima: ausência de dado é
+    # normal e nunca deve virar erro.
+    market_cap: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+    enterprise_value: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+    forward_pe: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    operating_margin: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    total_debt: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+    total_cash: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+    operating_cash_flow: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+    gross_profit: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+    shares_outstanding: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+
     asset: Mapped[Asset] = relationship(  # noqa: F821
         "Asset", back_populates="fundamental_snapshots"
     )

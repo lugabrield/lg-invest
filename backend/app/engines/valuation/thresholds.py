@@ -21,6 +21,13 @@ from decimal import Decimal
 # o Valuation Engine não depender de símbolo de outra camada.
 NOT_APPLICABLE_CLASSES = ("crypto", "cash", "bond", "etf")
 
+# Forma positiva de NOT_APPLICABLE_CLASSES — usada pela tela Inteligência
+# (Sprint 22) para excluir cripto/renda fixa/caixa/ETF dos rankings de
+# valuation ("mais baratos"/"mais caros"), já que para essas classes o
+# valor exibido é o proxy de preço v1 (fallback do pilar), não uma
+# classificação real de múltiplos.
+APPLICABLE_CLASSES = ("stock", "fii", "reit")
+
 LOWER_IS_CHEAPER = "lower_is_cheaper"
 HIGHER_IS_CHEAPER = "higher_is_cheaper"
 

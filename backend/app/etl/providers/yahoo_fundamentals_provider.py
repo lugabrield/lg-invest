@@ -11,9 +11,15 @@ versões do yfinance. Todo campo ausente ou não numérico vira `None`,
 nunca uma exceção — quem decide como comunicar isso ao usuário é a
 camada de schema/serviço, não este provider.
 
-`dividendYield`/`payoutRatio` são usados como o yfinance os retorna
-(fração, ex.: 0.03 = 3%); se uma versão futura da lib mudar essa
-convenção, o ajuste é local a este arquivo.
+`dividendYield`/`payoutRatio` são normalmente devolvidos pelo yfinance
+como fração (ex.: 0.03 = 3%), mas foi observado na prática (Sprint 22 —
+BTLG11 exibindo Dividend Yield de 950%) que, para alguns tickers,
+sobretudo FIIs/ativos fora de ações americanas, o yfinance retorna
+esses campos já multiplicados por 100 (ex.: 9.5 em vez de 0.095). Todo
+campo percentual lido de `info` passa por `_normalize_percentage()`
+antes de virar `FundamentalData`, que corrige essa inconsistência de
+escala sem distorcer valores que já chegam como fração — ver a função
+para o critério exato.
 """
 
 from __future__ import annotations
@@ -51,6 +57,34 @@ def _ratio(numerator: Decimal | None, denominator: Decimal | None) -> Decimal | 
     if numerator is None or denominator is None or denominator == 0:
         return None
     return numerator / denominator
+
+
+# Acima deste limiar (100%), um campo que deveria ser uma fração 0..1
+# quase certamente foi devolvido pelo yfinance já em escala percentual
+# (ex.: 9.5 em vez de 0.095) — dividend yield, payout ratio e margens
+# acima de 100% são praticamente inexistentes na prática, então esse
+# limiar é seguro para os campos onde `_normalize_percentage` é usada.
+# Limitação conhecida e documentada: ROE/ROA de empresas com alavancagem
+# extrema podem, em casos raros e legítimos, superar 100% — esses casos
+# ficariam incorretamente divididos por 100 por esta heurística. Ver
+# docs/DATA_QUALITY.md.
+_PERCENTAGE_SANITY_THRESHOLD = Decimal("1")
+
+
+def _normalize_percentage(value: Decimal | None) -> Decimal | None:
+    """Normaliza um campo que deveria ser fração 0..1 (ex.: 0.095 = 9,5%).
+
+    Não distorce valores que já chegam corretamente como fração (`<= 1`
+    em módulo) — só divide por 100 quando o valor já parece estar em
+    escala percentual (`> 1`), corrigindo a inconsistência observada em
+    alguns tickers/classes (Sprint 22) sem exigir uma lista de exceções
+    por ticker.
+    """
+    if value is None:
+        return None
+    if abs(value) > _PERCENTAGE_SANITY_THRESHOLD:
+        return value / Decimal("100")
+    return value
 
 
 def _row_value(frame, row_label: str, column) -> Decimal | None:
@@ -101,10 +135,10 @@ class YahooFundamentalsProvider(FundamentalsProvider):
             period_end=period_end,
             source_name=self.name,
             collected_at=collected,
-            roe=_to_decimal(info.get("returnOnEquity")),
-            roa=_to_decimal(info.get("returnOnAssets")),
-            net_margin=_to_decimal(info.get("profitMargins")),
-            ebitda_margin=_to_decimal(info.get("ebitdaMargins")),
+            roe=_normalize_percentage(_to_decimal(info.get("returnOnEquity"))),
+            roa=_normalize_percentage(_to_decimal(info.get("returnOnAssets"))),
+            net_margin=_normalize_percentage(_to_decimal(info.get("profitMargins"))),
+            ebitda_margin=_normalize_percentage(_to_decimal(info.get("ebitdaMargins"))),
             revenue=_to_decimal(info.get("totalRevenue")),
             net_income=_to_decimal(info.get("netIncomeToCommon")),
             ebitda=ebitda,
@@ -115,11 +149,20 @@ class YahooFundamentalsProvider(FundamentalsProvider):
             pe_ratio=_to_decimal(info.get("trailingPE")),
             pb_ratio=_to_decimal(info.get("priceToBook")),
             ev_ebitda=_to_decimal(info.get("enterpriseToEbitda")),
-            dividend_yield=_to_decimal(info.get("dividendYield")),
-            payout_ratio=_to_decimal(info.get("payoutRatio")),
+            dividend_yield=_normalize_percentage(_to_decimal(info.get("dividendYield"))),
+            payout_ratio=_normalize_percentage(_to_decimal(info.get("payoutRatio"))),
             eps=_to_decimal(info.get("trailingEps")),
             revenue_per_share=_to_decimal(info.get("revenuePerShare")),
             beta=_to_decimal(info.get("beta")),
+            market_cap=_to_decimal(info.get("marketCap")),
+            enterprise_value=_to_decimal(info.get("enterpriseValue")),
+            forward_pe=_to_decimal(info.get("forwardPE")),
+            operating_margin=_normalize_percentage(_to_decimal(info.get("operatingMargins"))),
+            total_debt=total_debt,
+            total_cash=total_cash,
+            operating_cash_flow=_to_decimal(info.get("operatingCashflow")),
+            gross_profit=_to_decimal(info.get("grossProfits")),
+            shares_outstanding=_to_decimal(info.get("sharesOutstanding")),
         )
 
     def get_history(self, ticker: str) -> list[FundamentalData]:

@@ -18,6 +18,7 @@ from backend.app.infrastructure.repositories.portfolio_repository import Portfol
 from backend.app.services import fx_settings_service
 from backend.app.services.dashboard_view_service import GROUP_ORDER, build_dashboard_view
 from backend.app.services.portfolio_import_service import PortfolioImportService
+from frontend.streamlit_app.cache import clear_all_caches
 from frontend.streamlit_app.components.sections import section
 from frontend.streamlit_app.components.tables import (
     render_grouped_positions,
@@ -61,10 +62,18 @@ def render(portfolio_id: int) -> None:
             st.caption(
                 "Clique no cabeçalho de uma coluna para ordenar por valor, peso, rentabilidade ou grupo."
             )
-            render_positions_table(view.positions, view.largest_position_ticker)
+            render_positions_table(view.positions, view.largest_position_ticker, simplified=True)
+            with st.expander(
+                "Ver detalhes (moeda, preço médio, origem do preço, alertas)", expanded=False
+            ):
+                render_positions_table(
+                    view.positions, view.largest_position_ticker, key="detailed_table"
+                )
 
             st.subheader("Agrupado por classe")
-            render_grouped_positions(view.positions, GROUP_ORDER, view.largest_position_ticker)
+            render_grouped_positions(
+                view.positions, GROUP_ORDER, view.largest_position_ticker, simplified=True
+            )
 
             if view.estimated_price_tickers:
                 st.warning(
@@ -91,6 +100,7 @@ def render(portfolio_id: int) -> None:
                 _ensure_portfolio(db, portfolio_id)
                 result = PortfolioImportService(db).import_positions(portfolio_id, tmp_path)
             Path(tmp_path).unlink(missing_ok=True)
+            clear_all_caches()
 
             st.subheader("Resumo da importação")
             col_a, col_b, col_c = st.columns(3)

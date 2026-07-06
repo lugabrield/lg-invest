@@ -33,6 +33,7 @@ class AssetIntelligence(BaseModel):
     growth: Decimal | None = None
     risk: Decimal | None = None
     capital_reinvestment: Decimal | None = None
+    recommendation_hint: str = ""
     explanation: list[ConvictionPillarResult] = []
 
     # motivo textual quando has_conviction_score é False (ex.: ativo sem

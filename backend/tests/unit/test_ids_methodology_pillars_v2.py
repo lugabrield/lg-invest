@@ -1,8 +1,7 @@
-"""Testes dos pilares v2 da IDS Methodology (Sprint 17) — puro, sem banco/rede."""
+"""Testes dos pilares v2 da IDS Methodology (Sprint 17; Sprint 21) — puro, sem banco/rede."""
 
 from __future__ import annotations
 
-from datetime import date, datetime
 from decimal import Decimal
 
 from backend.app.engines.ids_methodology.pillars import (
@@ -13,7 +12,7 @@ from backend.app.engines.ids_methodology.pillars import (
     valuation_pillar_v2,
 )
 from backend.app.engines.lg_score.inputs import ScoreInput
-from backend.app.schemas.fundamentals import FundamentalSnapshotResult
+from backend.app.schemas.capital_reinvestment import ReinvestmentResult
 from backend.app.schemas.growth import GrowthResult
 from backend.app.schemas.quality import QualityResult
 from backend.app.schemas.risk import RiskResult
@@ -30,15 +29,17 @@ def _input(**kwargs) -> ScoreInput:
     return ScoreInput(**base)
 
 
-def _snapshot(**kwargs) -> FundamentalSnapshotResult:
+def _reinvestment(**kwargs) -> ReinvestmentResult:
+    """Constrói um ReinvestmentResult de teste (saída do Capital Reinvestment Engine, Sprint 21)."""
     base = {
         "ticker": "WEGE3.SA",
-        "period_end": date(2026, 6, 30),
-        "source": "yahoo",
-        "collected_at": datetime(2026, 7, 2, 12, 0, 0),
+        "asset_class": "stock",
+        "classification": "forte",
+        "score": Decimal("80"),
+        "confidence": "alta",
     }
     base.update(kwargs)
-    return FundamentalSnapshotResult(**base)
+    return ReinvestmentResult(**base)
 
 
 def test_quality_pillar_v2_uses_real_result():
@@ -87,23 +88,46 @@ def test_valuation_pillar_v2_uses_real_result():
 
 
 def test_capital_reinvestment_v2_not_applicable_class():
-    pillar = capital_reinvestment_pillar_v2("fii", _snapshot(payout_ratio=Decimal("0.95")))
+    result = _reinvestment(
+        asset_class="fii",
+        classification="nao_aplicavel",
+        score=None,
+        reason="reinvestimento de capital não aplicável a FIIs (obrigados a distribuir 95% do lucro)",
+    )
+    pillar = capital_reinvestment_pillar_v2("fii", result)
     assert pillar.score == Decimal("50")
     assert "não aplicável" in pillar.reasons[0]
 
 
-def test_capital_reinvestment_v2_missing_payout():
+def test_capital_reinvestment_v2_missing_result():
     pillar = capital_reinvestment_pillar_v2("stock", None)
     assert pillar.score == Decimal("50")
     assert "dado ausente" in pillar.reasons[0]
 
 
+def test_capital_reinvestment_v2_indeterminate_result():
+    result = _reinvestment(
+        classification="indeterminado",
+        score=None,
+        confidence="baixa",
+        reason="payout ratio ausente",
+    )
+    pillar = capital_reinvestment_pillar_v2("stock", result)
+    assert pillar.score == Decimal("50")
+    assert "não aplicável" in pillar.reasons[0]
+
+
 def test_capital_reinvestment_v2_high_retention():
-    pillar = capital_reinvestment_pillar_v2("stock", _snapshot(payout_ratio=Decimal("0.1")))
+    result = _reinvestment(classification="forte", score=Decimal("80"))
+    pillar = capital_reinvestment_pillar_v2("stock", result)
     assert pillar.score > Decimal("50")
 
 
 def test_capital_reinvestment_v2_low_retention_scores_lower_than_high_retention():
-    low_retention = capital_reinvestment_pillar_v2("stock", _snapshot(payout_ratio=Decimal("0.9")))
-    high_retention = capital_reinvestment_pillar_v2("stock", _snapshot(payout_ratio=Decimal("0.1")))
+    low_retention = capital_reinvestment_pillar_v2(
+        "stock", _reinvestment(classification="fraco", score=Decimal("20"))
+    )
+    high_retention = capital_reinvestment_pillar_v2(
+        "stock", _reinvestment(classification="forte", score=Decimal("80"))
+    )
     assert low_retention.score < high_retention.score

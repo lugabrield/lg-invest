@@ -1,11 +1,16 @@
-"""Bandas de qualidade por indicador e classe de ativo (Sprint 16).
+"""Bandas de qualidade por indicador e classe de ativo (Sprint 16; Sprint 21).
 
 Heurística MVP própria, com faixas fixas — um ponto de partida simples
 e auditável, não uma recomendação. "Melhor" é sempre um ROE/margem
 MAIOR ou uma dívida/EBITDA MENOR.
 
-Escopo desta sprint: só ações (`stock`), onde ROE/margem/alavancagem
-são indicadores padrão. FIIs, REITs e outras classes exigiriam
+Escopo: ações (`stock`) e REITs (`reit`) — REITs americanos publicam
+demonstrativos em US GAAP e o yfinance costuma expor ROE/margem/dívida
+para eles do mesmo jeito que para ações comuns, então as mesmas bandas
+servem como primeira aproximação (não é uma métrica ideal para REIT —
+o padrão do setor é FFO/AFFO, fora do escopo do MVP — mas é melhor que
+"indeterminado" quando o dado existe). FIIs brasileiros não publicam
+essas métricas via yfinance na prática e outras classes exigiriam
 indicadores próprios (ex.: vacância, qualidade de inquilinos) fora do
 escopo do MVP — recebem "indeterminado" com razão explícita.
 """
@@ -15,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-APPLICABLE_CLASSES = ("stock",)
+APPLICABLE_CLASSES = ("stock", "reit")
 
 HIGHER_IS_BETTER = "higher_is_better"
 LOWER_IS_BETTER = "lower_is_better"

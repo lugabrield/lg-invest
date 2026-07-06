@@ -10,7 +10,8 @@ from __future__ import annotations
 import plotly.graph_objects as go
 
 from backend.app.schemas.dashboard_view import ConvertedPosition
-from frontend.streamlit_app.styles.theme import NEGATIVE, POSITIVE
+from frontend.streamlit_app.charts._theme import apply_dark_layout
+from frontend.streamlit_app.styles.theme import NEGATIVE, POSITIVE, PRIMARY
 
 
 def chart_top_positions(positions: list[ConvertedPosition], top_n: int = 10) -> go.Figure:
@@ -23,7 +24,7 @@ def chart_top_positions(positions: list[ConvertedPosition], top_n: int = 10) -> 
                 y=[p.ticker for p in ranked],
                 x=[float(p.position_value_brl) for p in ranked],
                 orientation="h",
-                marker_color="#1F6FEB",
+                marker_color=PRIMARY,
                 text=[f"R$ {float(p.position_value_brl):,.0f}" for p in ranked],
                 textposition="outside",
             )
@@ -35,7 +36,7 @@ def chart_top_positions(positions: list[ConvertedPosition], top_n: int = 10) -> 
         height=max(320, 28 * len(ranked)),
         xaxis_title="R$",
     )
-    return fig
+    return apply_dark_layout(fig)
 
 
 def chart_return_by_asset(positions: list[ConvertedPosition]) -> go.Figure:
@@ -62,4 +63,4 @@ def chart_return_by_asset(positions: list[ConvertedPosition]) -> go.Figure:
         height=max(320, 28 * len(ranked)),
         xaxis_title="%",
     )
-    return fig
+    return apply_dark_layout(fig)

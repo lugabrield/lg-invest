@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.streamlit/secrets.toml
 
 # Banco e dados (nunca versionar dados pessoais de carteira)
 data/lg_invest.db

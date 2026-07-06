@@ -13,13 +13,19 @@ from __future__ import annotations
 from decimal import Decimal
 
 from backend.app.engines.decision.allocation import select_and_distribute
-from backend.app.engines.decision.eligibility import filter_eligible
+from backend.app.engines.decision.eligibility import filter_eligible, filter_eligible_v3
 from backend.app.engines.decision.inputs import (
     DEFAULT_CONFIG,
     DecisionConfig,
     DecisionInput,
+    PolicyLimits,
+    PortfolioAggregates,
 )
-from backend.app.engines.decision.scoring import compute_buy_score, compute_buy_score_v2
+from backend.app.engines.decision.scoring import (
+    compute_buy_score,
+    compute_buy_score_v2,
+    compute_buy_score_v3,
+)
 from backend.app.schemas.recommendation_result import (
     DecisionAudit,
     IgnoredItem,
@@ -29,6 +35,7 @@ from backend.app.schemas.recommendation_result import (
 
 MODEL_VERSION = "decision_v1"
 MODEL_VERSION_V2 = "decision_v2"
+MODEL_VERSION_V3 = "decision_v3"
 _LOW_CONFIDENCE = Decimal("0.6")
 
 
@@ -73,6 +80,7 @@ def recommend(
                 weight=weight,
                 buy_score=a.buy_score,
                 lg_score=c.lg_score,
+                item_confidence=c.confidence,
                 reasons=s.reasons,
             )
         )
@@ -149,6 +157,7 @@ def recommend_v2(
                 buy_score=a.buy_score,
                 lg_score=c.lg_score,
                 conviction_score=c.conviction_score,
+                item_confidence=c.confidence,
                 reasons=s.reasons,
             )
         )
@@ -200,13 +209,29 @@ def _build_explanation_v2(items, amount, allocated) -> str:
 
 
 def _build_alerts(items, ignored, confidence, allocated, amount) -> list[str]:
+    """Monta os alertas da recomendação — nunca sugere aporte com dado ruim sem avisar
+    (pedido explícito do usuário no Sprint 21). Alertas de confiança são específicos por
+    ativo quando possível, não só um aviso genérico no fim."""
     alerts: list[str] = []
     if not items:
         alerts.append("Nenhum ativo elegível para aporte: verifique bloqueios e concentração.")
-    if confidence < _LOW_CONFIDENCE and items:
+
+    low_confidence_items = [
+        i for i in items if i.item_confidence is not None and i.item_confidence < _LOW_CONFIDENCE
+    ]
+    if low_confidence_items:
+        tickers = ", ".join(i.ticker for i in low_confidence_items)
         alerts.append(
-            "Confiança baixa: recomendação baseada em dados limitados; revise antes de aportar."
+            f"Recomendação com baixa confiança por falta de fundamentos/valuation em: "
+            f"{tickers}. O sistema ainda inclui esses ativos na distribuição (não bloqueia "
+            "por confiança baixa), mas o motivo está registrado — revise antes de aportar."
         )
+    elif confidence < _LOW_CONFIDENCE and items:
+        alerts.append(
+            "Recomendação com baixa confiança por falta de fundamentos/valuation; revise "
+            "antes de aportar."
+        )
+
     if allocated < amount and items:
         resto = amount - allocated
         alerts.append(f"Restou R$ {resto:.2f} não alocado por restrições de mínimo/limites.")
@@ -221,4 +246,107 @@ def _build_explanation(items, amount, allocated) -> str:
         f"Aporte de R$ {amount:.2f}: distribuídos R$ {allocated:.2f} entre "
         f"{len(items)} ativo(s) — " + "; ".join(partes) + ". "
         "Prioridade para ativos com melhor LG Score e menor concentração."
+    )
+
+
+def recommend_v3(
+    candidates: list[DecisionInput],
+    amount: Decimal,
+    blocked: set[str] | None = None,
+    config: DecisionConfig = DEFAULT_CONFIG,
+    policy: PolicyLimits | None = None,
+    aggregates: PortfolioAggregates | None = None,
+) -> RecommendationResult:
+    """Gera a recomendação de aporte v3 (Sprint 24, Fase 4): score
+    multi-fator (fundamentos/quality/valuation/growth/risk + alocação-alvo
+    multi-dimensão + concentração + internacionalização, escalado pela
+    confiança do dado) e bloqueio adicional por Investment Policy e por
+    Target Allocation Rule Engine v2 — sempre pausando aporte, nunca
+    recomendando venda.
+
+    Mesmo fluxo das versões anteriores (filtrar elegíveis -> pontuar ->
+    distribuir -> explicar -> auditar); `policy`/`aggregates` ausentes
+    (`None`) fazem o v3 se comportar como se não houvesse política
+    configurada — nunca inventa limites.
+    """
+    if amount <= 0:
+        raise ValueError("O valor do aporte deve ser positivo.")
+
+    blocked = blocked or set()
+
+    eligible, ignored = filter_eligible_v3(
+        candidates, blocked, config, policy=policy, aggregates=aggregates
+    )
+    scores = [compute_buy_score_v3(c, policy=policy, aggregates=aggregates) for c in eligible]
+    score_by_ticker = {s.ticker: s for s in scores}
+    input_by_ticker = {c.ticker: c for c in eligible}
+
+    allocations = select_and_distribute(scores, amount, config)
+    allocated_total = sum((a.amount for a in allocations), start=Decimal("0"))
+
+    items: list[RecommendationItem] = []
+    for a in allocations:
+        c = input_by_ticker[a.ticker]
+        s = score_by_ticker[a.ticker]
+        weight = (a.amount / amount) if amount > 0 else Decimal("0")
+        items.append(
+            RecommendationItem(
+                ticker=a.ticker,
+                amount=a.amount,
+                weight=weight,
+                buy_score=a.buy_score,
+                lg_score=c.lg_score,
+                conviction_score=c.conviction_score,
+                item_confidence=c.confidence,
+                reasons=s.reasons,
+            )
+        )
+
+    chosen = [input_by_ticker[a.ticker] for a in allocations]
+    if chosen:
+        confidence = sum((c.confidence for c in chosen), start=Decimal("0")) / Decimal(len(chosen))
+    else:
+        confidence = Decimal("0")
+
+    alerts = _build_alerts(items, ignored, confidence, allocated_total, amount)
+    explanation = _build_explanation_v3(items, amount, allocated_total)
+
+    audit = DecisionAudit(
+        contribution_amount=amount,
+        eligible_tickers=[c.ticker for c in eligible],
+        blocked_tickers=sorted(blocked),
+        model_version=MODEL_VERSION_V3,
+        weights={
+            "fundamentals": 0.40,
+            "allocation_bonus_multi_dimension": 0.25,
+            "concentration_inverted": 0.20,
+            "international_bonus": 0.15,
+            "confidence_scaling": 1.0,
+        },
+    )
+
+    return RecommendationResult(
+        contribution_amount=amount,
+        allocated_amount=allocated_total,
+        items=items,
+        ignored=[IgnoredItem(ticker=i.ticker, reason=i.reason) for i in ignored],
+        alerts=alerts,
+        confidence=confidence,
+        confidence_label=_confidence_label(confidence),
+        explanation=explanation,
+        audit=audit,
+    )
+
+
+def _build_explanation_v3(items, amount, allocated) -> str:
+    if not items:
+        return "Não houve recomendação de aporte para os critérios atuais."
+    partes = [f"{i.ticker}: R$ {i.amount:.2f}" for i in items]
+    return (
+        f"Aporte de R$ {amount:.2f}: distribuídos R$ {allocated:.2f} entre "
+        f"{len(items)} ativo(s) — " + "; ".join(partes) + ". "
+        "Prioridade combinando fundamentos (quality/valuation/growth/risk), gap de "
+        "alocação-alvo (classe/moeda/país/ativo), concentração e exposição "
+        "internacional em relação à política de investimento, com o score ajustado "
+        "pela confiança do dado disponível."
     )

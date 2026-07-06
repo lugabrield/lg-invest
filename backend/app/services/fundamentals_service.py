@@ -57,6 +57,15 @@ _SNAPSHOT_FIELDS = (
     "eps",
     "revenue_per_share",
     "beta",
+    "market_cap",
+    "enterprise_value",
+    "forward_pe",
+    "operating_margin",
+    "total_debt",
+    "total_cash",
+    "operating_cash_flow",
+    "gross_profit",
+    "shares_outstanding",
 )
 
 

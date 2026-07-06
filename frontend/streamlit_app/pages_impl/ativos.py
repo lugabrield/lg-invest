@@ -23,12 +23,28 @@ from backend.app.infrastructure.repositories.fundamentals_repository import (
 )
 from backend.app.infrastructure.repositories.price_repository import PriceRepository
 from backend.app.schemas.fundamentals import FundamentalSnapshotResult
+from backend.app.services.conviction_score_service import ConvictionScoreService
+from backend.app.services.data_quality_service import DataQualityService
 from backend.app.services.fundamentals_analysis_service import FundamentalsAnalysisService
 from backend.app.services.lg_score_service import LGScoreService
 from backend.app.services.valuation_service import ValuationService
+from frontend.streamlit_app.cache import clear_all_caches
+from frontend.streamlit_app.components.badges import (
+    classification_badge_html,
+    confidence_badge_html,
+    data_quality_badge_html,
+)
 from frontend.streamlit_app.components.sections import section
 from frontend.streamlit_app.db import session_scope
 from frontend.streamlit_app.formatting import format_money, format_number, format_pct
+
+_PILLAR_LABELS_PT = {
+    "quality": "Qualidade",
+    "valuation": "Valuation",
+    "growth": "Crescimento",
+    "risk": "Risco",
+    "capital_reinvestment": "Reinvestimento de capital",
+}
 
 _STATUS_LABELS = {
     "automatic": "🌐 Automático",
@@ -58,6 +74,15 @@ _FUNDAMENTAL_FIELDS = (
     "eps",
     "revenue_per_share",
     "beta",
+    "market_cap",
+    "enterprise_value",
+    "forward_pe",
+    "operating_margin",
+    "total_debt",
+    "total_cash",
+    "operating_cash_flow",
+    "gross_profit",
+    "shares_outstanding",
 )
 
 
@@ -162,6 +187,77 @@ def render() -> None:
                         st.caption(f"· {reason}")
 
     with section(
+        "LG Conviction Score v2",
+        "🧠",
+        caption=(
+            "Metodologia completa: Quality/Valuation/Growth/Risk/Capital Reinvestment, "
+            "com pesos por classe de ativo (ver Inteligência para a carteira toda)."
+        ),
+    ):
+        conviction_ticker = st.selectbox("Ativo", tickers, key="conviction_ticker")
+        with session_scope() as db:
+            conviction = ConvictionScoreService(db).score_ticker(conviction_ticker)
+            asset_for_dq = AssetRepository(db).get_by_ticker(conviction_ticker)
+            dq = (
+                DataQualityService(db).evaluate_ticker(
+                    conviction_ticker,
+                    asset_for_dq.id,
+                    asset_for_dq.asset_class,
+                    is_manual=asset_for_dq.is_manual,
+                )
+                if asset_for_dq is not None
+                else None
+            )
+
+        if conviction is None:
+            st.info(
+                f"Conviction Score indisponível para {conviction_ticker} (sem histórico de preço)."
+            )
+        else:
+            st.markdown(
+                f"{classification_badge_html(conviction.classification)} "
+                f"{confidence_badge_html(conviction.confidence_label)} &nbsp; "
+                f"**Score: {float(conviction.conviction_score):.1f} / 100**",
+                unsafe_allow_html=True,
+            )
+            if conviction.recommendation_hint:
+                st.caption(conviction.recommendation_hint)
+
+            pillar_cols = st.columns(5)
+            pillar_values = {
+                "quality": conviction.quality,
+                "valuation": conviction.valuation,
+                "growth": conviction.growth,
+                "risk": conviction.risk,
+                "capital_reinvestment": conviction.capital_reinvestment,
+            }
+            for col, (key, value) in zip(pillar_cols, pillar_values.items(), strict=False):
+                col.metric(_PILLAR_LABELS_PT[key], f"{float(value):.1f}")
+
+            with st.expander("Motivos por pilar"):
+                for pillar in conviction.explanation:
+                    st.markdown(f"**{_PILLAR_LABELS_PT.get(pillar.name, pillar.name)}**")
+                    for reason in pillar.reasons:
+                        st.caption(f"· {reason}")
+
+        if dq is not None:
+            st.markdown("**Qualidade dos dados usados**")
+            badges_html = " ".join(
+                [
+                    data_quality_badge_html(dq.price_status, f"Preço: {dq.price_status}"),
+                    data_quality_badge_html(
+                        dq.fundamentals_status, f"Fundamentos: {dq.fundamentals_status}"
+                    ),
+                    data_quality_badge_html(
+                        dq.valuation_status, f"Valuation: {dq.valuation_status}"
+                    ),
+                ]
+            )
+            st.markdown(badges_html, unsafe_allow_html=True)
+            if dq.issues:
+                st.caption(" · ".join(dq.issues))
+
+    with section(
         "Atualizar preço automático de um ativo",
         "🔄",
         caption=(
@@ -186,6 +282,7 @@ def render() -> None:
                 elif result.error:
                     st.error(f"Não foi possível atualizar {update_ticker}: {result.error}")
                 else:
+                    clear_all_caches()
                     st.success(
                         f"{update_ticker} atualizado: +{result.inserted} inserido(s), "
                         f"{result.updated} atualizado(s), {result.rejected} rejeitado(s)."
@@ -215,6 +312,7 @@ def render() -> None:
                         fund_ticker
                     )
                 if result.collected:
+                    clear_all_caches()
                     st.success(
                         f"Fundamentos de {fund_ticker} coletados (período mais recente: "
                         f"{result.period_end})."
@@ -235,6 +333,7 @@ def render() -> None:
 
                 with session_scope() as db:
                     batch = FundamentalsService(db, YahooFundamentalsProvider()).collect_all()
+                clear_all_caches()
                 st.success(
                     f"Coleta em lote concluída: {batch.total_collected} coletado(s), "
                     f"{batch.total_skipped} pulado(s) (manuais/classe não aplicável)."
@@ -260,6 +359,17 @@ def render() -> None:
                 f"Período de referência: {snapshot_view.period_end.strftime('%d/%m/%Y')} · "
                 f"Cobertura: {format_pct(snapshot_view.coverage_pct)} dos indicadores"
             )
+            if fund_asset.asset_class == "fii":
+                st.info(
+                    "FIIs são fundos, não empresas operacionais: ROE, P/L e margem "
+                    "operacional abaixo são calculados pelo Yahoo Finance como se o FII "
+                    "fosse uma ação comum — um **proxy do MVP** que costuma não ser um "
+                    "indicador significativo para este tipo de ativo. Para avaliar um FII, "
+                    "priorize **P/VP** e **Dividend Yield** (metricas realmente usadas para a "
+                    "classe — ver `docs/QUALITY_GROWTH_RISK_ENGINES.md`); a cobertura de dado "
+                    "e a confiança do LG Conviction Score para FIIs também são calculadas só "
+                    "sobre essas duas métricas, não sobre os 28 campos completos."
+                )
             col1, col2, col3 = st.columns(3)
             col1.metric(
                 "ROE", format_pct(snapshot_view.roe) if snapshot_view.roe is not None else "—"
@@ -304,6 +414,32 @@ def render() -> None:
                     else "—"
                 ),
             )
+            col4, col5, col6 = st.columns(3)
+            col4.metric(
+                "Market Cap",
+                (
+                    format_money(snapshot_view.market_cap, fund_asset.currency)
+                    if snapshot_view.market_cap is not None
+                    else "—"
+                ),
+            )
+            col5.metric(
+                "Forward P/E",
+                (
+                    format_number(snapshot_view.forward_pe, 2)
+                    if snapshot_view.forward_pe is not None
+                    else "—"
+                ),
+            )
+            col6.metric(
+                "Margem operacional",
+                (
+                    format_pct(snapshot_view.operating_margin)
+                    if snapshot_view.operating_margin is not None
+                    else "—"
+                ),
+            )
+
             if snapshot_view.missing_fields:
                 st.caption("Indisponíveis: " + ", ".join(snapshot_view.missing_fields))
 
@@ -386,6 +522,7 @@ def render() -> None:
                 else:
                     flag_asset.is_manual = new_flag
                     db.commit()
+                    clear_all_caches()
                     estado = "manual" if new_flag else "automático"
                     st.success(f"{flag_ticker} marcado como {estado}.")
 
@@ -429,6 +566,7 @@ def render() -> None:
                                     source="manual",
                                 )
                             )
+                        clear_all_caches()
                         st.success(
                             f"Preço atual de {manual_ticker} salvo: {manual_price} (manual)."
                         )

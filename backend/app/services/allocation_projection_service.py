@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from backend.app.engines.portfolio.concentration import herfindahl_index
 from backend.app.schemas.allocation_projection import AllocationProjection, WeightComparison
 from backend.app.schemas.dashboard_view import DashboardView
 from backend.app.schemas.recommendation_result import RecommendationResult
@@ -89,10 +90,26 @@ def build_allocation_projection(
         )
         currency_after[p.currency] = currency_after.get(p.currency, _ZERO) + value_after[p.ticker]
 
+    weight_by_ticker_before = _weighted(value_before, total_before)
+    weight_by_ticker_after = _weighted(value_after, total_after)
+    weights_before = list(weight_by_ticker_before.values())
+    weights_after = list(weight_by_ticker_after.values())
+
+    international_before = sum(
+        (weight_by_ticker_before[p.ticker] for p in view.positions if p.currency != "BRL"), _ZERO
+    )
+    international_after = sum(
+        (weight_by_ticker_after[p.ticker] for p in view.positions if p.currency != "BRL"), _ZERO
+    )
+
     return AllocationProjection(
         contribution_amount=recommendation.contribution_amount,
         total_before_brl=total_before,
         total_after_brl=total_after,
         by_group=_to_comparisons(group_before, group_after, total_before, total_after),
         by_currency=_to_comparisons(currency_before, currency_after, total_before, total_after),
+        concentration_hhi_before=herfindahl_index(weights_before),
+        concentration_hhi_after=herfindahl_index(weights_after),
+        international_weight_before=international_before,
+        international_weight_after=international_after,
     )

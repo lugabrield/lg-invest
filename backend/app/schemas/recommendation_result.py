@@ -19,6 +19,7 @@ class RecommendationItem(BaseModel):
     buy_score: Decimal  # 0..1
     lg_score: Decimal  # 0..100
     conviction_score: Decimal | None = None  # 0..100, só preenchido pelo Decision Engine 2.0
+    item_confidence: Decimal | None = None  # 0..1 — confiança do dado usado neste ativo (Sprint 21)
     reasons: list[str]
 
 

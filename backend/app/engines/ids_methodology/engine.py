@@ -34,7 +34,7 @@ from backend.app.engines.ids_methodology.weights import IdsPillarWeights
 from backend.app.engines.lg_score.confidence import confidence_label
 from backend.app.engines.lg_score.inputs import ScoreInput
 from backend.app.engines.lg_score.normalization import clamp_score
-from backend.app.schemas.fundamentals import FundamentalSnapshotResult
+from backend.app.schemas.capital_reinvestment import ReinvestmentResult
 from backend.app.schemas.growth import GrowthResult
 from backend.app.schemas.ids_methodology import ConvictionPillarResult, ConvictionScoreResult
 from backend.app.schemas.quality import QualityResult
@@ -58,6 +58,51 @@ def _classify(score: Decimal) -> str:
     if score >= 40:
         return "Weak"
     return "Avoid"
+
+
+# Confiança mínima para o v2 emitir uma classificação de decisão
+# (strong_buy/buy/hold/watch/avoid). Abaixo disso, o score numérico pode
+# até existir, mas a plataforma se recusa a sugerir uma direção — dado
+# insuficiente é comunicado como tal, nunca escondido atrás de um score
+# (Volume 18 §8; pedido explícito do usuário no Sprint 21: "se a
+# recomendação tiver baixa confiança, explique o motivo").
+_MIN_CONFIDENCE_FOR_DECISION = Decimal("0.35")
+
+
+def _classify_v2(score: Decimal, confidence: Decimal) -> str:
+    """Classificação de decisão do v2 — strong_buy/buy/hold/watch/avoid/insufficient_data."""
+    if confidence < _MIN_CONFIDENCE_FOR_DECISION:
+        return "insufficient_data"
+    if score >= 80:
+        return "strong_buy"
+    if score >= 65:
+        return "buy"
+    if score >= 50:
+        return "hold"
+    if score >= 35:
+        return "watch"
+    return "avoid"
+
+
+def _recommendation_hint_v2(classification: str, score: Decimal, confidence: Decimal) -> str:
+    """Frase curta explicando a classificação v2 — sempre menciona a confiança quando baixa."""
+    if classification == "insufficient_data":
+        return (
+            f"Confiança insuficiente ({float(confidence) * 100:.0f}%) para classificar este "
+            "ativo com segurança — faltam fundamentos e/ou valuation confiáveis. Score "
+            f"calculado ({float(score):.1f}) é referência, não recomendação."
+        )
+    labels = {
+        "strong_buy": "Conviction Score alto com confiança suficiente — candidato prioritário a aporte.",
+        "buy": "Conviction Score bom — candidato a aporte dentro dos limites de concentração.",
+        "hold": "Conviction Score neutro — manter posição atual, sem sinal forte para aportar mais.",
+        "watch": "Conviction Score abaixo do neutro — monitorar antes de novos aportes.",
+        "avoid": "Conviction Score baixo — evitar novos aportes até a tese ser revista.",
+    }
+    hint = labels.get(classification, "")
+    if confidence < Decimal("0.6"):
+        hint += f" Confiança média/baixa ({float(confidence) * 100:.0f}%): trate com cautela."
+    return hint
 
 
 def calculate_conviction_score(
@@ -143,7 +188,7 @@ def calculate_conviction_score_v2(
     growth_result: GrowthResult | None = None,
     risk_result: RiskResult | None = None,
     valuation_result: ValuationResult | None = None,
-    latest_snapshot: FundamentalSnapshotResult | None = None,
+    reinvestment_result: ReinvestmentResult | None = None,
 ) -> ConvictionScoreResult:
     """Calcula o LG Conviction Score v2 de um ativo.
 
@@ -161,7 +206,7 @@ def calculate_conviction_score_v2(
     valuation = valuation_pillar_v2(data, valuation_result)
     growth = growth_pillar_v2(data, growth_result)
     risk = risk_pillar_v2(data, risk_result)
-    capital_reinvestment = capital_reinvestment_pillar_v2(data.asset_class, latest_snapshot)
+    capital_reinvestment = capital_reinvestment_pillar_v2(data.asset_class, reinvestment_result)
 
     conviction_score = clamp_score(
         Decimal(str(resolved_weights.quality)) * quality.score
@@ -206,6 +251,7 @@ def calculate_conviction_score_v2(
         ),
     ]
 
+    classification_v2 = _classify_v2(conviction_score, confidence)
     return ConvictionScoreResult(
         ticker=data.ticker,
         conviction_score=conviction_score,
@@ -216,7 +262,10 @@ def calculate_conviction_score_v2(
         capital_reinvestment=capital_reinvestment.score,
         confidence=confidence,
         confidence_label=confidence_label(confidence),
-        classification=_classify(conviction_score),
+        classification=classification_v2,
+        recommendation_hint=_recommendation_hint_v2(
+            classification_v2, conviction_score, confidence
+        ),
         model_version=MODEL_VERSION_V2,
         explanation=explanation,
     )

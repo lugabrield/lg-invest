@@ -31,6 +31,21 @@ _NUMBER_COLUMN_CONFIG = {
 
 _PRICE_SOURCE_LABELS = {"yahoo": "Automático", "manual": "Manual", "estimated": "Estimado"}
 
+# Colunas essenciais para leitura rápida (Sprint 22 — tabela cheia
+# ficava espremida com as 13 colunas de uma vez). Moeda, preço médio,
+# origem do preço e alerta continuam disponíveis, só movidos para o
+# modo "detalhado" (`simplified=False`) em vez de sempre visíveis.
+_SIMPLE_COLUMNS = [
+    "🏆",
+    "Ticker",
+    "Grupo",
+    "Quantidade",
+    "Preço atual",
+    "Valor (R$ convertido)",
+    "Peso %",
+    "Rentab. %",
+]
+
 
 def _position_row(p: ConvertedPosition, largest_ticker: str | None) -> dict:
     is_negative = p.return_pct is not None and p.return_pct < 0
@@ -55,14 +70,24 @@ def render_positions_table(
     positions: list[ConvertedPosition],
     largest_ticker: str | None = None,
     key: str | None = None,
+    simplified: bool = False,
 ) -> None:
-    """Tabela única com todas as posições, ordenável por qualquer coluna (clique no cabeçalho)."""
+    """Tabela única com todas as posições, ordenável por qualquer coluna (clique no cabeçalho).
+
+    `simplified=True` mostra só as colunas essenciais (`_SIMPLE_COLUMNS`)
+    para telas mais estreitas ou com muitas posições — moeda, preço
+    médio, origem do preço e alerta continuam acessíveis no modo
+    completo (Sprint 22).
+    """
     if not positions:
         st.info("Nenhuma posição para exibir.")
         return
     rows = [_position_row(p, largest_ticker) for p in positions]
+    df = pd.DataFrame(rows)
+    if simplified:
+        df = df[[c for c in _SIMPLE_COLUMNS if c in df.columns]]
     st.dataframe(
-        pd.DataFrame(rows),
+        df,
         column_config=_NUMBER_COLUMN_CONFIG,
         width="stretch",
         hide_index=True,
@@ -75,6 +100,7 @@ def render_grouped_positions(
     group_order: list[str],
     largest_ticker: str | None = None,
     expanded: bool = True,
+    simplified: bool = False,
 ) -> None:
     """Uma tabela por grupo (Ações BR, FIIs, ...), para separar visualmente as classes."""
     for group in group_order:
@@ -87,4 +113,6 @@ def render_grouped_positions(
         )
         suffix = f" · {negative_count} em queda" if negative_count else ""
         with st.expander(f"{group} · {format_brl(group_total)}{suffix}", expanded=expanded):
-            render_positions_table(group_positions, largest_ticker, key=f"table_{group}")
+            render_positions_table(
+                group_positions, largest_ticker, key=f"table_{group}", simplified=simplified
+            )
