@@ -4,11 +4,11 @@
   "usd_brl_quote_date": "2026-07-03T13:08:41.147385",
   "usd_brl_fetched_at": "2026-07-05T07:51:42.514092+00:00",
   "target_allocation": {
-    "stock": "0.35",
+    "stock": "0.3",
     "fii": "0.2",
-    "etf": "0.1",
-    "reit": "0.1",
-    "crypto": "0.1",
+    "etf": "0.25",
+    "reit": "0.05",
+    "crypto": "0.05",
     "bond": "0.15",
     "cash": "0.0"
   }
