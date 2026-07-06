@@ -6,6 +6,10 @@ escala do score pela confiança do dado, bloqueio por Investment Policy
 (peso por ativo / cripto agregado / FII agregado) e por Target Allocation
 Rule Engine v2 (`gap_status == "blocked"`), e a regra de ouro: nunca
 recomendar venda, mesmo em bloqueio ou desvio extremo.
+
+Sprint 25 (Parte 1): a precedência entre a regra detalhada e a
+Investment Policy tem sua própria suíte dedicada em
+`test_decision_limit_precedence.py`.
 """
 
 from __future__ import annotations
@@ -201,10 +205,26 @@ def test_filter_v3_does_not_block_when_no_policy_configured():
 
 
 def test_filter_v3_blocks_via_rule_signal_blocked_status():
-    candidate = _candidate(rule_signals=(AllocationRuleSignal("class", "blocked", 0, True, True),))
+    candidate = _candidate(
+        asset_class="fii",
+        rule_signals=(
+            AllocationRuleSignal(
+                "class",
+                "blocked",
+                0,
+                True,
+                True,
+                dimension_key="fii",
+                current_weight=Decimal("0.344"),
+                max_weight=Decimal("0.25"),
+            ),
+        ),
+    )
     eligible, ignored = filter_eligible_v3([candidate], set(), DEFAULT_CONFIG)
     assert eligible == []
-    assert "bloqueado pela meta de alocação-alvo" in ignored[0].reason
+    assert "regra detalhada" in ignored[0].reason
+    assert "34.4%" in ignored[0].reason
+    assert "25.0%" in ignored[0].reason
 
 
 def test_filter_v3_still_applies_v1_blocking_rules():

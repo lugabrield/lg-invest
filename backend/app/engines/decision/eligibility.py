@@ -12,11 +12,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.app.engines.decision.inputs import (
+    AllocationRuleSignal,
     DecisionConfig,
     DecisionInput,
     PolicyLimits,
     PortfolioAggregates,
 )
+
+# Rótulos em português para a mensagem de bloqueio por regra detalhada
+# (Sprint 25, Parte 1) — cobre as 4 dimensões do Target Allocation Rule
+# Engine v2 (`engines/target_allocation/engine.py`).
+_DIMENSION_LABELS = {
+    "class": "classe",
+    "currency": "moeda",
+    "country": "país",
+    "asset": "ativo",
+}
 
 
 @dataclass
@@ -70,35 +81,50 @@ def filter_eligible_v3(
 ) -> tuple[list[DecisionInput], list[IgnoredAsset]]:
     """Mesmo filtro do v1 (bloqueio manual + sobreconcentração), acrescido de:
 
-    - limite por ativo (`policy.max_asset_weight`);
-    - limite agregado de classe (`policy.max_crypto_weight` para `crypto`,
-      `policy.target_fii_max` para `fii`), usando os pesos agregados da
-      carteira inteira (`aggregates`), não o peso do ativo isolado;
     - qualquer sinal de `rule_signals` com `gap_status == "blocked"`
-      (Target Allocation Rule Engine v2).
+      (Target Allocation Rule Engine v2, regra DETALHADA por classe,
+      moeda, país ou ativo) — verificado PRIMEIRO;
+    - limite por ativo (`policy.max_asset_weight`) e limite agregado de
+      classe (`policy.max_crypto_weight` para `crypto`,
+      `policy.target_fii_max` para `fii`) da Investment Policy, usados
+      como FALLBACK apenas quando não existe uma regra detalhada com
+      `max_weight` definido para a mesma dimensão.
+
+    Precedência de limites (Sprint 25, Parte 1 — corrige bug em que o
+    bloqueio usava, por engano, o limite genérico da política mesmo
+    quando uma regra detalhada mais específica já existia, e a mensagem
+    mostrava o limite errado para o usuário):
+
+    1. Target Allocation Rule Engine v2 (regra detalhada) — se existir
+       uma regra com `max_weight` para a dimensão (classe/moeda/país/
+       ativo) do candidato, ela é a fonte de verdade do limite,
+       independente do que a Investment Policy diga.
+    2. Investment Policy — usada só quando NÃO existe regra detalhada
+       com `max_weight` para aquela dimensão (hoje cobre `asset`, via
+       `max_asset_weight`, e `class` para `crypto`/`fii`, via
+       `max_crypto_weight`/`target_fii_max`).
+    3. Sem regra detalhada e sem política configurada: nenhum limite é
+       inventado — o candidato não é bloqueado por concentração de
+       classe/ativo.
     """
     eligible, ignored = filter_eligible(candidates, blocked, config)
 
     still_eligible: list[DecisionInput] = []
     for c in eligible:
-        reason = _policy_block_reason(c, policy, aggregates)
-        if reason is not None:
-            ignored.append(IgnoredAsset(c.ticker, reason))
-            continue
-
         blocked_signal = next(
             (s for s in c.rule_signals if s.gap_status == "blocked"),
             None,
         )
         if blocked_signal is not None:
-            ignored.append(
-                IgnoredAsset(
-                    c.ticker,
-                    f"aporte bloqueado pela meta de alocação-alvo na dimensão "
-                    f"'{blocked_signal.dimension_type}' (peso atual acima do máximo "
-                    "configurado). Nenhuma venda é recomendada — apenas pausa de aporte.",
-                )
-            )
+            ignored.append(IgnoredAsset(c.ticker, _detailed_rule_block_message(blocked_signal)))
+            continue
+
+        dimensions_with_detailed_limit = {
+            s.dimension_type for s in c.rule_signals if s.max_weight is not None
+        }
+        reason = _policy_block_reason(c, policy, aggregates, dimensions_with_detailed_limit)
+        if reason is not None:
+            ignored.append(IgnoredAsset(c.ticker, reason))
             continue
 
         still_eligible.append(c)
@@ -106,23 +132,48 @@ def filter_eligible_v3(
     return still_eligible, ignored
 
 
+def _detailed_rule_block_message(signal: AllocationRuleSignal) -> str:
+    """Mensagem de bloqueio quando a fonte do limite é a regra detalhada
+    (Target Allocation Rule Engine v2) — sempre cita 'regra detalhada' e o
+    limite máximo configurado NELA, nunca o da Investment Policy."""
+    label = _DIMENSION_LABELS.get(signal.dimension_type, signal.dimension_type)
+    max_str = f"{signal.max_weight * 100:.1f}%" if signal.max_weight is not None else "configurado"
+    return (
+        f"{label} '{signal.dimension_key}' já acima do limite máximo configurado na regra "
+        f"detalhada de alocação-alvo ({signal.current_weight * 100:.1f}% > {max_str}). "
+        "Aporte pausado para essa dimensão, não é recomendação de venda."
+    )
+
+
 def _policy_block_reason(
     candidate: DecisionInput,
     policy: PolicyLimits | None,
     aggregates: PortfolioAggregates | None,
+    dimensions_with_detailed_limit: set[str] | None = None,
 ) -> str | None:
+    """Fallback da Investment Policy — só se aplica a uma dimensão quando
+    NÃO existe regra detalhada com `max_weight` para ela (ver docstring de
+    `filter_eligible_v3`); `dimensions_with_detailed_limit` chega vazio
+    quando não há nenhum sinal de regra aplicável, preservando o
+    comportamento anterior à Sprint 25 nesse caso."""
     if policy is None:
         return None
 
-    if policy.max_asset_weight is not None and candidate.current_weight > policy.max_asset_weight:
+    dimensions_with_detailed_limit = dimensions_with_detailed_limit or set()
+
+    if (
+        "asset" not in dimensions_with_detailed_limit
+        and policy.max_asset_weight is not None
+        and candidate.current_weight > policy.max_asset_weight
+    ):
         return (
-            f"excede o peso máximo por ativo da política de investimento "
+            f"excede o peso máximo por ativo da política geral de investimento "
             f"({candidate.current_weight * 100:.1f}% > "
             f"{policy.max_asset_weight * 100:.1f}%). Aporte pausado, não é recomendação "
             "de venda."
         )
 
-    if aggregates is None:
+    if aggregates is None or "class" in dimensions_with_detailed_limit:
         return None
 
     if (
@@ -131,7 +182,7 @@ def _policy_block_reason(
         and aggregates.crypto_weight > policy.max_crypto_weight
     ):
         return (
-            f"classe 'crypto' já acima do limite máximo da política "
+            f"classe 'crypto' já acima do limite máximo da política geral "
             f"({aggregates.crypto_weight * 100:.1f}% > "
             f"{policy.max_crypto_weight * 100:.1f}%). Aporte pausado para toda a "
             "classe, não é recomendação de venda."
@@ -143,7 +194,7 @@ def _policy_block_reason(
         and aggregates.fii_weight > policy.target_fii_max
     ):
         return (
-            f"classe 'fii' já acima do limite máximo da política "
+            f"classe 'fii' já acima do limite máximo da política geral "
             f"({aggregates.fii_weight * 100:.1f}% > {policy.target_fii_max * 100:.1f}%). "
             "Aporte pausado para toda a classe, não é recomendação de venda."
         )

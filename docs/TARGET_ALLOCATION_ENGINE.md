@@ -148,15 +148,30 @@ que ser um dos 4 valores válidos, `dimension_key` não pode ser vazio, pesos
 não podem ser negativos, `min_weight <= max_weight` e
 `target_weight <= max_weight`.
 
-## O que ainda não existe (fica para a Fase 4+)
+## Precedência sobre a Investment Policy (Sprint 25, Parte 1)
 
-- Nenhuma tela ainda mostra a avaliação (`evaluate_portfolio_rules`) de
-  forma visual — só o cadastro de regras existe na Fase 3. A exibição do
-  resultado (gaps, prioridades, alertas) fica para a Fase 9 (Dashboard
-  2.0/Inteligência) ou antes, se o Decision Engine 3.0 (Fase 4) precisar
-  dela primeiro.
-- O Decision Engine 3.0 ainda não consome `evaluate_portfolio_rules()` —
-  está listado como uma das entradas do multi-factor score na Fase 4.
+Desde a Fase 4, o Decision Engine 3.0 consome `evaluate_portfolio_rules()`
+tanto para bônus de aporte (dimensão underweight) quanto para bloqueio
+(`gap_status == "blocked"`). A Investment Policy (`max_asset_weight`,
+`max_crypto_weight`, `target_fii_max`) também define limites, de forma
+independente. Na Sprint 25 corrigimos um bug de precedência: quando as
+duas fontes tinham um limite configurado para a mesma dimensão (ex.:
+`class=fii` com `max_weight=25%` aqui E `target_fii_max=15%` na política),
+o Decision Engine 3.0 usava por engano o limite da política na mensagem
+de bloqueio, mesmo esta regra (mais específica) devendo mandar.
+
+A regra agora é: **esta engine (regra detalhada) sempre tem precedência**
+sobre a Investment Policy para qualquer dimensão em que `max_weight`
+esteja definido; a política só é usada como fallback quando não há
+regra aqui para aquela dimensão. Ver `docs/DECISION_ENGINE_3.md` (seção
+"Precedência entre regra detalhada e Investment Policy") para o detalhe
+completo e os testes (`test_decision_limit_precedence.py`).
+
+## O que ainda não existe
+
+- Nenhum histórico de como `evaluate_portfolio_rules()` mudou ao longo do
+  tempo — cada carregamento recalcula contra os pesos atuais, sem
+  comparar com avaliações anteriores.
 
 ## Migration
 

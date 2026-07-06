@@ -21,6 +21,10 @@ class RecommendationItem(BaseModel):
     conviction_score: Decimal | None = None  # 0..100, só preenchido pelo Decision Engine 2.0
     item_confidence: Decimal | None = None  # 0..1 — confiança do dado usado neste ativo (Sprint 21)
     reasons: list[str]
+    # Sprint 25, Parte 2.5: True quando este item veio da Watchlist/Radar
+    # (ainda não é posição) e não do Portfolio Engine — a UI usa isto
+    # para separar visualmente "Já tenho" de "Novo candidato".
+    is_new_from_watchlist: bool = False
 
 
 class IgnoredItem(BaseModel):

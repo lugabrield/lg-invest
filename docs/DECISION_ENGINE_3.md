@@ -89,14 +89,55 @@ manual do usuário + sobreconcentração via `over_concentration_limit`).
 Camadas adicionais, todas opcionais (a engine funciona normalmente sem
 `policy`/`aggregates`, simplesmente sem aplicar essas checagens):
 
-1. **Por ativo**: `current_weight > policy.max_asset_weight`.
-2. **Por classe agregada**: `asset_class == "crypto"` com
-   `aggregates.crypto_weight > policy.max_crypto_weight`, ou
-   `asset_class == "fii"` com `aggregates.fii_weight > policy.target_fii_max`
-   — nota: usa o peso agregado da **carteira inteira** nessa classe, não o
-   peso do ativo isolado.
-3. **Por sinal de regra**: qualquer `AllocationRuleSignal` com
-   `gap_status == "blocked"` (Target Allocation Rule Engine v2).
+1. **Por sinal de regra detalhada** (verificado PRIMEIRO): qualquer
+   `AllocationRuleSignal` com `gap_status == "blocked"` (Target Allocation
+   Rule Engine v2, Fase 3) — dimensão classe, moeda, país ou ativo.
+2. **Por ativo, via Investment Policy** (fallback): `current_weight >
+   policy.max_asset_weight`, só quando não existe uma regra detalhada com
+   `max_weight` para a dimensão `asset` deste ticker.
+3. **Por classe agregada, via Investment Policy** (fallback):
+   `asset_class == "crypto"` com `aggregates.crypto_weight >
+   policy.max_crypto_weight`, ou `asset_class == "fii"` com
+   `aggregates.fii_weight > policy.target_fii_max` — só quando não existe
+   uma regra detalhada com `max_weight` para a dimensão `class` deste
+   ativo. Nota: usa o peso agregado da **carteira inteira** nessa classe,
+   não o peso do ativo isolado.
+
+### Precedência entre regra detalhada e Investment Policy (Sprint 25, Parte 1)
+
+Corrigido um bug em que, com uma regra detalhada e um limite genérico da
+política configurados ao mesmo tempo para a mesma classe (ex.: `class=fii`
+com `max_weight=25%` na regra detalhada E `target_fii_max=15%` na
+política), o bloqueio usava por engano o limite da política na mensagem
+— mesmo a regra detalhada, mais específica, sendo a que deveria mandar.
+Um FII a 34,4% do patrimônio mostrava "acima do limite máximo da política
+(34.4% > 15.0%)" em vez de citar os 25% da regra detalhada.
+
+Precedência corrigida, válida para as 4 dimensões (classe, moeda, país,
+ativo):
+
+1. **Regra detalhada** (Target Allocation Rule Engine v2) — se tiver
+   `max_weight` para a dimensão, é a fonte de verdade do limite,
+   independentemente do que a Investment Policy diga.
+2. **Investment Policy** — usada só como fallback, quando NÃO existe
+   regra detalhada com `max_weight` para aquela dimensão (hoje cobre
+   `asset`, via `max_asset_weight`, e `class` para `crypto`/`fii`, via
+   `max_crypto_weight`/`target_fii_max` — a política não tem limite
+   genérico para `bond`/`etf`/`reit`/`stock`/`currency`/`country`, então
+   para essas dimensões o único limite possível é o de uma regra
+   detalhada).
+3. **Nenhuma das duas**: nenhum limite é inventado — o candidato não é
+   bloqueado por concentração de classe/ativo.
+
+A mensagem de bloqueio sempre cita a fonte do limite ("regra detalhada de
+alocação-alvo" ou "política geral de investimento") e o valor correto
+dessa fonte, nunca o de outra. Removendo a regra detalhada, o
+comportamento volta a usar a política automaticamente — a precedência é
+recalculada a cada chamada, não fica "presa" a um estado anterior.
+Testes: `test_decision_limit_precedence.py` (23 casos, incluindo o
+cenário exato reportado pelo usuário via `DecisionService.recommend_v3`
+ponta a ponta, e uma checagem parametrizada cobrindo classe, moeda, país
+e ativo).
 
 ### Regra de ouro: nunca recomendar venda
 
@@ -145,6 +186,32 @@ distribuição/justificativa por ativo já usada para v1/v2 (o schema
 populados por v3, sem necessidade de UI dedicada). O texto de ajuda do
 seletor reitera que nenhuma versão jamais recomenda venda, apenas pausa
 aporte.
+
+## Integração opcional com Watchlist/Radar (Sprint 25, Parte 2.5)
+
+`recommend_v3(..., allow_watchlist_candidates=False)`: com `False`
+(default), o comportamento é idêntico ao anterior à Sprint 25 — o Radar
+nunca é consultado. Com `True`, `build_inputs_v3` também inclui candidatos
+NOVOS (sem posição) que o `RadarService` classificou como
+`"new_candidate"` (nunca `monitor`/`avoid`/`blocked`/`insufficient_data`,
+nunca um ticker que já é posição).
+
+Cada candidato novo entra como `DecisionInput(current_weight=0,
+is_new_from_watchlist=True)`. A engine usa esse campo só para aplicar o
+teto de alocação inicial mais conservador,
+`DecisionConfig.max_new_asset_weight` (default 25%, nunca 100% do
+aporte) — implementado em `engines/decision/allocation.py`, que agora
+recebe `new_asset_tickers: frozenset[str]` e usa
+`min(max_single_weight, max_new_asset_weight)` como teto por ativo para
+esses tickers. O excedente fica não alocado, nunca redistribuído à força
+para outro ativo. Quando a recomendação inclui algum item novo, um alerta
+específico é adicionado reforçando "considere iniciar uma posição
+pequena" — nunca "compre" — e citando o teto aplicado.
+
+Ver `docs/WATCHLIST_RADAR.md` para o Radar Engine em si e
+`test_decision_watchlist_integration.py`/`test_decision_allocation_limits.py`
+para os testes (integração via `RadarService` mockado + teto de alocação
+puro).
 
 ## O que ainda não existe
 

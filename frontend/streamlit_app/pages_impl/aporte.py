@@ -85,6 +85,22 @@ def render(portfolio_id: int) -> None:
     )
     persist = st.checkbox("Salvar recomendação (auditoria)", value=True)
 
+    allow_watchlist = False
+    if engine_version == "v3":
+        allow_watchlist = st.checkbox(
+            "Permitir ativos novos da watchlist",
+            value=False,
+            help=(
+                "Quando marcado, o motor v3 também considera candidatos NOVOS "
+                "(sem posição na carteira) que o Radar já classificou como "
+                "'new_candidate' — nunca um ativo com dado frágil ou já bloqueado. "
+                "Um ativo novo nunca recebe mais do que um teto reduzido do aporte "
+                "(hoje 25%), e a recomendação nunca cria a posição sozinha: cabe a "
+                "você decidir se e quando iniciar. Cadastre e avalie candidatos na "
+                "tela Radar."
+            ),
+        )
+
     if not st.button("Gerar recomendação"):
         return
     if amount <= 0:
@@ -95,17 +111,25 @@ def render(portfolio_id: int) -> None:
     with session_scope() as db:
         view_before = build_dashboard_view(db, portfolio_id, exchange_rate)
         service = DecisionService(db)
-        recommend_fn = {
-            "v1": service.recommend,
-            "v2": service.recommend_v2,
-            "v3": service.recommend_v3,
-        }[engine_version]
-        result = recommend_fn(
-            portfolio_id,
-            Decimal(str(amount)),
-            blocked={t.upper() for t in blocked},
-            persist=persist,
-        )
+        if engine_version == "v3":
+            result = service.recommend_v3(
+                portfolio_id,
+                Decimal(str(amount)),
+                blocked={t.upper() for t in blocked},
+                persist=persist,
+                allow_watchlist_candidates=allow_watchlist,
+            )
+        else:
+            recommend_fn = {
+                "v1": service.recommend,
+                "v2": service.recommend_v2,
+            }[engine_version]
+            result = recommend_fn(
+                portfolio_id,
+                Decimal(str(amount)),
+                blocked={t.upper() for t in blocked},
+                persist=persist,
+            )
 
     with section("Resultado da recomendação", "🧭"):
         st.write(result.explanation)
@@ -118,48 +142,72 @@ def render(portfolio_id: int) -> None:
                 "informado necessariamente é distribuído — veja 'Ativos ignorados' abaixo."
             )
 
-    if result.items:
-        with section("Distribuição sugerida", "📥"):
-            st.dataframe(
-                [
-                    {
-                        "Ticker": i.ticker,
-                        "Valor": format_brl(i.amount),
-                        "% do aporte": format_pct(i.weight),
-                        "Score compra": f"{float(i.buy_score):.2f}",
-                        "LG Score": f"{float(i.lg_score):.1f}",
-                        **(
-                            {
-                                "Conviction Score": (
-                                    f"{float(i.conviction_score):.1f}"
-                                    if i.conviction_score is not None
-                                    else "—"
-                                )
-                            }
-                            if engine_version in ("v2", "v3")
-                            else {}
-                        ),
-                        "Confiança do dado": (
-                            f"{float(i.item_confidence) * 100:.0f}%"
-                            if i.item_confidence is not None
-                            else "—"
-                        ),
-                    }
-                    for i in result.items
-                ],
-                width="stretch",
-                hide_index=True,
-            )
-            with st.expander("Justificativa por ativo"):
-                for i in result.items:
-                    confidence_note = (
-                        f" (confiança do dado: {float(i.item_confidence) * 100:.0f}%)"
-                        if i.item_confidence is not None
-                        else ""
+    def _item_row(i) -> dict:
+        return {
+            "Ticker": i.ticker,
+            "Valor": format_brl(i.amount),
+            "% do aporte": format_pct(i.weight),
+            "Score compra": f"{float(i.buy_score):.2f}",
+            "LG Score": f"{float(i.lg_score):.1f}",
+            **(
+                {
+                    "Conviction Score": (
+                        f"{float(i.conviction_score):.1f}"
+                        if i.conviction_score is not None
+                        else "—"
                     )
-                    st.markdown(f"**{i.ticker}** — {format_brl(i.amount)}{confidence_note}")
-                    for reason in i.reasons:
-                        st.caption(f"· {reason}")
+                }
+                if engine_version in ("v2", "v3")
+                else {}
+            ),
+            "Confiança do dado": (
+                f"{float(i.item_confidence) * 100:.0f}%" if i.item_confidence is not None else "—"
+            ),
+        }
+
+    def _item_expander_entries(items) -> None:
+        for i in items:
+            confidence_note = (
+                f" (confiança do dado: {float(i.item_confidence) * 100:.0f}%)"
+                if i.item_confidence is not None
+                else ""
+            )
+            st.markdown(f"**{i.ticker}** — {format_brl(i.amount)}{confidence_note}")
+            for reason in i.reasons:
+                st.caption(f"· {reason}")
+
+    if result.items:
+        held_items = [i for i in result.items if not i.is_new_from_watchlist]
+        new_items = [i for i in result.items if i.is_new_from_watchlist]
+
+        if new_items:
+            # Separação visual pedida na Sprint 25, Parte 2.5: nunca misturar
+            # "já tenho" com "candidato novo" na mesma lista sem distinção —
+            # e nunca usar linguagem de "compra garantida" para o candidato novo.
+            with section("Já tenho", "📌"):
+                if held_items:
+                    st.dataframe(
+                        [_item_row(i) for i in held_items], width="stretch", hide_index=True
+                    )
+                    with st.expander("Justificativa por ativo"):
+                        _item_expander_entries(held_items)
+                else:
+                    st.caption("Nenhum ativo já existente na carteira entrou nesta recomendação.")
+
+            with section("Novo candidato (Watchlist)", "🆕"):
+                st.caption(
+                    "Estes ativos ainda não são posição na sua carteira. A recomendação "
+                    "aqui é só para você **considerar iniciar uma posição pequena** — "
+                    "nada é comprado ou registrado automaticamente."
+                )
+                st.dataframe([_item_row(i) for i in new_items], width="stretch", hide_index=True)
+                with st.expander("Justificativa por ativo novo"):
+                    _item_expander_entries(new_items)
+        else:
+            with section("Distribuição sugerida", "📥"):
+                st.dataframe([_item_row(i) for i in result.items], width="stretch", hide_index=True)
+                with st.expander("Justificativa por ativo"):
+                    _item_expander_entries(result.items)
 
     for alert in result.alerts:
         st.warning(alert)

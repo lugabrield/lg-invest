@@ -281,7 +281,12 @@ def recommend_v3(
     score_by_ticker = {s.ticker: s for s in scores}
     input_by_ticker = {c.ticker: c for c in eligible}
 
-    allocations = select_and_distribute(scores, amount, config)
+    # Sprint 25, Parte 2.5: tickers novos da Watchlist/Radar (sem posição
+    # existente) recebem o teto reduzido `max_new_asset_weight` em vez do
+    # teto padrão — nunca 100% do aporte em um ativo ainda não possuído.
+    new_asset_tickers = frozenset(c.ticker for c in eligible if c.is_new_from_watchlist)
+
+    allocations = select_and_distribute(scores, amount, config, new_asset_tickers=new_asset_tickers)
     allocated_total = sum((a.amount for a in allocations), start=Decimal("0"))
 
     items: list[RecommendationItem] = []
@@ -299,6 +304,7 @@ def recommend_v3(
                 conviction_score=c.conviction_score,
                 item_confidence=c.confidence,
                 reasons=s.reasons,
+                is_new_from_watchlist=c.is_new_from_watchlist,
             )
         )
 
@@ -309,6 +315,14 @@ def recommend_v3(
         confidence = Decimal("0")
 
     alerts = _build_alerts(items, ignored, confidence, allocated_total, amount)
+    if any(i.is_new_from_watchlist for i in items):
+        novos = ", ".join(i.ticker for i in items if i.is_new_from_watchlist)
+        alerts.append(
+            f"Candidato(s) novo(s) da Watchlist nesta recomendação: {novos}. Considere "
+            "iniciar uma posição pequena (nunca definido automaticamente) — a alocação "
+            f"inicial está limitada a {config.max_new_asset_weight * 100:.0f}% do aporte "
+            "para ativos que você ainda não possui."
+        )
     explanation = _build_explanation_v3(items, amount, allocated_total)
 
     audit = DecisionAudit(

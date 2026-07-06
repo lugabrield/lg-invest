@@ -51,6 +51,10 @@ from backend.app.infrastructure.database.models.thesis_review import (
     REVIEW_CLASSIFICATIONS,
     ThesisReview,
 )
+from backend.app.infrastructure.database.models.watchlist_asset import (
+    WATCHLIST_STATUSES,
+    WatchlistAsset,
+)
 
 __all__ = [
     "Base",
@@ -83,4 +87,6 @@ __all__ = [
     "RISK_TOLERANCES",
     "TargetAllocationRule",
     "TARGET_ALLOCATION_DIMENSIONS",
+    "WatchlistAsset",
+    "WATCHLIST_STATUSES",
 ]

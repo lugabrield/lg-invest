@@ -3,6 +3,55 @@
 Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
+## [1.27.0] - Sprint 25 (Parte 1 + Parte 2) — Precedência de limites e Watchlist/Radar
+
+### Contexto
+Primeira sprint pós-"Investment Decision System" (Sprint 24) focada em ajuste fino e expansão: corrigir um bug real de precedência reportado pelo usuário na tela Aporte, e construir um subsistema novo — Watchlist + Radar Engine — para acompanhar ativos candidatos sem nunca alterar patrimônio ou criar posição. Dado o tamanho do pedido original (7 partes), esta entrega cobriu as Partes 1 e 2 (2.1 a 2.6) por ordem explícita de prioridade do usuário; Partes 3-5 (proventos históricos, explicabilidade do Aporte, UX de Configurações) ficaram de fora desta rodada — ver "Riscos conhecidos"/entrega detalhada.
+
+### Corrigido — Precedência de limites no Decision Engine 3.0 (Parte 1)
+- Bug: com uma Target Allocation Rule detalhada (ex.: `class=fii`, `max_weight=25%`) E um limite genérico da Investment Policy (`target_fii_max=15%`) configurados ao mesmo tempo, o bloqueio de aporte usava por engano o limite da política na mensagem, mesmo a regra detalhada devendo mandar. Um FII a 34,4% mostrava "acima do limite máximo da política (34.4% > 15.0%)" em vez de citar os 25% corretos.
+- `engines/decision/eligibility.py` (`filter_eligible_v3`): checagem de bloqueio por regra detalhada agora roda **antes** do fallback de política, para as 4 dimensões (classe, moeda, país, ativo). Investment Policy só é usada quando não existe regra detalhada com `max_weight` para aquela dimensão. Nenhum limite é inventado quando nem uma nem outra existe.
+- `engines/decision/inputs.py` (`AllocationRuleSignal`): novos campos `dimension_key`, `current_weight`, `max_weight`, `alert_message` (todos com default, não quebram chamadas existentes) para a mensagem de bloqueio citar a fonte e o valor corretos.
+- `services/decision_service.py`: `build_inputs_v3` passa esses novos campos ao montar os sinais.
+- Regra de ouro preservada: nenhum bloqueio (detalhado ou de política) gera recomendação de venda.
+
+### Adicionado — Watchlist (Parte 2.1-2.3)
+- Migration `a3f7c9e2d156`: tabela `watchlist_assets` (aditiva, começa vazia, testada via `alembic upgrade head` / `downgrade -1` / `upgrade head` contra banco descartável).
+- Modelo `WatchlistAsset` + `WATCHLIST_STATUSES` (`watching`/`candidate`/`blocked`/`discarded`/`bought`), registrado em `infrastructure/database/models/__init__.py`.
+- `WatchlistAssetRepository`, schemas `WatchlistAssetCreate`/`Update`/`View`/`WatchlistDataCollectionResult` (`schemas/watchlist.py`), e `WatchlistService` (`add_watchlist_asset`, `update_watchlist_asset`, `remove_watchlist_asset`, `list_watchlist_assets`, `get_watchlist_asset_by_ticker`, `set_status`, `mark_as_bought`, `block_asset`, `discard_asset`, `collect_data_for_asset`).
+- Garantias: nunca cria `Position`, nunca duplica ticker ativo (permite recadastro após `discarded`), sinaliza `already_in_portfolio` sem alterar a posição real, nunca inventa score/confiança (marca `low_confidence` e explica o motivo em `notes`).
+
+### Adicionado — Radar Engine (Parte 2.4)
+- `engines/radar/` (pacote novo, puro): `RadarCandidateInput`, `RadarConfig`, `evaluate_radar()` — classifica cada ativo (posição ou candidato da watchlist) em uma de 6 categorias: `current_holding_candidate`, `new_candidate`, `monitor`, `avoid`, `blocked`, `insufficient_data`.
+- Regra de ouro: um ativo já na carteira nunca recebe `avoid` (reservado a candidatos novos) — na pior das hipóteses vira `monitor`.
+- `schemas/radar.py` (`RadarClassificationResult`, `RadarEvaluation` com `by_classification`/`count_by_classification`) e `services/radar_service.py` (`RadarService.evaluate`): resolve posições + watchlist (excluindo `discarded`) + scores (LG/Conviction, sem coletar dado novo) + bloqueio por dimensão via Target Allocation Rule Engine v2.
+
+### Adicionado — Integração opcional no Aporte v3 (Parte 2.5)
+- `DecisionService.recommend_v3(..., allow_watchlist_candidates=False)`: default preserva o comportamento v3 anterior à sprint; `True` inclui só candidatos `"new_candidate"` do Radar, nunca um ticker que já é posição.
+- `DecisionConfig.max_new_asset_weight` (default 25%) + `engines/decision/allocation.py` (`select_and_distribute(..., new_asset_tickers=...)`): teto de alocação inicial reduzido para ativos novos — nunca 100% do aporte, mesmo com o score dominante; excedente fica não alocado, nunca redistribuído à força.
+- `RecommendationItem.is_new_from_watchlist` (novo campo, default `False`) permite à UI separar "Já tenho" de "Novo candidato".
+- Tela **Aporte**: checkbox "Permitir ativos novos da watchlist" (só com motor v3), seções visuais separadas "Já tenho" / "Novo candidato (Watchlist)", cada uma com sua justificativa por ativo — linguagem sempre "considere iniciar uma posição pequena", nunca "compre".
+
+### Adicionado — Tela Radar (Parte 2.6)
+- Nova tela `pages_impl/radar.py`, registrada em `app.py` (ordem: Dashboard, Carteira, Ativos, Inteligência, Aporte, Simulação, **Radar**, Journal, Sincronizar Dividendos.me, Configurações) e no smoke test.
+- Seções: resumo da watchlist por status, formulário de cadastro rápido, tabela com ações (coletar dados de um/todos, bloquear, descartar, marcar comprado, remover), e o Radar de oportunidades (uma seção por classificação, com tabela + explicação por ativo).
+
+### Documentação
+- Novo `docs/WATCHLIST_RADAR.md`: Watchlist + Radar Engine completos (modelo, status, serviço, coleta de dados, as 6 classificações, integração com Aporte v3, tela, como validar).
+- `docs/DECISION_ENGINE_3.md`: nova seção "Precedência entre regra detalhada e Investment Policy" (Parte 1) e "Integração opcional com Watchlist/Radar" (Parte 2.5).
+- `docs/TARGET_ALLOCATION_ENGINE.md`: nova seção "Precedência sobre a Investment Policy".
+
+### Testes
+- `test_decision_limit_precedence.py` (23 testes, novo): precedência regra detalhada > política, cobrindo classe/moeda/país/ativo e o cenário exato reportado pelo usuário (FIIs em 2 tickers, 34,4% agregado, regra de 25%) via `DecisionService.recommend_v3` ponta a ponta.
+- `test_watchlist_service.py` (17), `test_radar_engine.py` (13), `test_radar_service.py` (5), `test_decision_watchlist_integration.py` (7), `test_decision_allocation_limits.py` (+5 para o teto de ativo novo).
+- Suíte completa: **871 testes passando**, 0 falhas. `ruff check` e `black --check --fast` limpos. Migration validada via `upgrade head` / `downgrade -1` / `upgrade head` contra banco descartável.
+
+### Riscos conhecidos / deixado de fora desta rodada
+- **Parte 3 (proventos históricos)**, **Parte 4 (explicabilidade do Aporte v3)** e **Parte 5 (UX de Configurações/alocação)** do pedido original não foram implementadas nesta entrega — ficaram fora por tamanho do escopo, seguindo a ordem de prioridade que o próprio usuário definiu (precedência de limites > Watchlist > Radar > integração no Aporte > testes > proventos > UX).
+- O bloqueio por dimensão do Radar reflete só a regra detalhada de alocação-alvo, não a Investment Policy isolada — ver limitação documentada em `docs/WATCHLIST_RADAR.md`.
+- `WatchlistService.collect_data_for_asset` não dispara coleta de preço/fundamentos externa automaticamente — só calcula com o que já existe no banco; a coleta em si continua sendo responsabilidade da tela Ativos.
+- Nenhuma tela mostra o histórico de como a classificação do Radar mudou ao longo do tempo para um mesmo ativo.
+
 ## [0.1.0] - Sprint 1 — Setup do projeto
 
 ### Adicionado

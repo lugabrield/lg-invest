@@ -148,17 +148,97 @@ class DecisionService:
 
         return result
 
-    def build_inputs_v3(self, portfolio_id: int) -> list[DecisionInput]:
+    def _decision_input_for_ticker(
+        self,
+        ticker: str,
+        asset_class: str,
+        current_weight: Decimal,
+        evaluation_by_key: dict[tuple[str, str], object],
+        is_new_from_watchlist: bool = False,
+    ) -> DecisionInput | None:
+        """Monta um `DecisionInput` a partir de LG Score/Conviction Score +
+        sinais do Target Allocation Rule Engine v2 — compartilhado entre
+        posições existentes e candidatos novos da Watchlist/Radar (Sprint
+        25, Parte 2.5). Retorna `None` quando nem o LG Score consegue ser
+        calculado (nunca inventa dado)."""
+        lg_service = LGScoreService(self.db)
+        conviction_service = ConvictionScoreService(self.db)
+
+        score = lg_service.score_ticker(ticker, current_weight=current_weight)
+        if score is None:
+            return None
+        conviction = conviction_service.score_ticker(ticker, current_weight=current_weight)
+
+        asset = self.assets.get_by_ticker(ticker)
+        country = asset.country if asset is not None else None
+        currency = asset.currency if asset is not None else None
+        is_international = country is not None and country != "BR"
+
+        signals: list[AllocationRuleSignal] = []
+        for dimension_type, dimension_key in (
+            ("class", asset_class),
+            ("currency", currency),
+            ("country", country),
+            ("asset", ticker),
+        ):
+            if dimension_key is None:
+                continue
+            evaluation = evaluation_by_key.get((dimension_type, dimension_key))
+            if evaluation is None:
+                continue
+            signals.append(
+                AllocationRuleSignal(
+                    dimension_type=dimension_type,
+                    gap_status=evaluation.gap_status,
+                    contribution_priority=evaluation.contribution_priority,
+                    rebalance_required=evaluation.rebalance_required,
+                    extreme_overweight=evaluation.extreme_overweight,
+                    dimension_key=evaluation.dimension_key,
+                    current_weight=evaluation.current_weight,
+                    max_weight=evaluation.max_weight,
+                    alert_message=evaluation.alert_message,
+                )
+            )
+
+        return DecisionInput(
+            ticker=ticker,
+            asset_class=asset_class,
+            lg_score=score.lg_score,
+            confidence=score.confidence,
+            current_weight=current_weight,
+            target_weight=None,
+            conviction_score=(conviction.conviction_score if conviction is not None else None),
+            quality_score=conviction.quality if conviction is not None else None,
+            valuation_score=conviction.valuation if conviction is not None else None,
+            growth_score=conviction.growth if conviction is not None else None,
+            risk_score=conviction.risk if conviction is not None else None,
+            currency=currency,
+            country=country,
+            is_international=is_international,
+            rule_signals=tuple(signals),
+            is_new_from_watchlist=is_new_from_watchlist,
+        )
+
+    def build_inputs_v3(
+        self, portfolio_id: int, allow_watchlist_candidates: bool = False
+    ) -> list[DecisionInput]:
         """Monta os candidatos v3 (Sprint 24, Fase 4): Portfolio + LG Score +
         Conviction Score (com pilares individuais quality/valuation/growth/
         risk) + sinais do Target Allocation Rule Engine v2 (classe/moeda/
         país/ativo) + país/moeda para o bônus de internacionalização. Um
         ativo sem Conviction Score calculável ainda entra na lista (mesma
         regra do v2): a engine cai de volta no LG Score para esse ativo
-        especificamente, nunca exclui um candidato por isso."""
+        especificamente, nunca exclui um candidato por isso.
+
+        `allow_watchlist_candidates` (Sprint 25, Parte 2.5): quando `True`,
+        adiciona candidatos NOVOS (sem posição) que o Radar Engine já
+        classificou como `"new_candidate"` — nunca inclui candidatos
+        `monitor`/`avoid`/`blocked`/`insufficient_data`, e nunca um ativo
+        que já é posição (esses continuam entrando pelo caminho normal
+        acima, mesmo com `allow_watchlist_candidates=True`). O default
+        `False` preserva o comportamento v3 exatamente como antes da
+        Sprint 25."""
         summary = PortfolioService(self.db).get_summary(portfolio_id)
-        lg_service = LGScoreService(self.db)
-        conviction_service = ConvictionScoreService(self.db)
 
         rule_engine_evaluation = TargetAllocationService(self.db).evaluate_portfolio_rules(
             portfolio_id
@@ -168,60 +248,31 @@ class DecisionService:
         }
 
         inputs: list[DecisionInput] = []
+        holding_tickers: set[str] = set()
         for pos in summary.positions:
-            score = lg_service.score_ticker(pos.ticker, current_weight=pos.weight)
-            if score is None:
-                continue
-            conviction = conviction_service.score_ticker(pos.ticker, current_weight=pos.weight)
-
-            asset = self.assets.get_by_ticker(pos.ticker)
-            country = asset.country if asset is not None else None
-            currency = asset.currency if asset is not None else None
-            is_international = country is not None and country != "BR"
-
-            signals: list[AllocationRuleSignal] = []
-            for dimension_type, dimension_key in (
-                ("class", pos.asset_class),
-                ("currency", currency),
-                ("country", country),
-                ("asset", pos.ticker),
-            ):
-                if dimension_key is None:
-                    continue
-                evaluation = evaluation_by_key.get((dimension_type, dimension_key))
-                if evaluation is None:
-                    continue
-                signals.append(
-                    AllocationRuleSignal(
-                        dimension_type=dimension_type,
-                        gap_status=evaluation.gap_status,
-                        contribution_priority=evaluation.contribution_priority,
-                        rebalance_required=evaluation.rebalance_required,
-                        extreme_overweight=evaluation.extreme_overweight,
-                    )
-                )
-
-            inputs.append(
-                DecisionInput(
-                    ticker=pos.ticker,
-                    asset_class=pos.asset_class,
-                    lg_score=score.lg_score,
-                    confidence=score.confidence,
-                    current_weight=pos.weight,
-                    target_weight=None,
-                    conviction_score=(
-                        conviction.conviction_score if conviction is not None else None
-                    ),
-                    quality_score=conviction.quality if conviction is not None else None,
-                    valuation_score=conviction.valuation if conviction is not None else None,
-                    growth_score=conviction.growth if conviction is not None else None,
-                    risk_score=conviction.risk if conviction is not None else None,
-                    currency=currency,
-                    country=country,
-                    is_international=is_international,
-                    rule_signals=tuple(signals),
-                )
+            holding_tickers.add(pos.ticker)
+            decision_input = self._decision_input_for_ticker(
+                pos.ticker, pos.asset_class, pos.weight, evaluation_by_key
             )
+            if decision_input is not None:
+                inputs.append(decision_input)
+
+        if allow_watchlist_candidates:
+            from backend.app.services.radar_service import RadarService
+
+            radar = RadarService(self.db).evaluate(portfolio_id)
+            for candidate in radar.by_classification("new_candidate"):
+                if candidate.ticker in holding_tickers:
+                    continue
+                decision_input = self._decision_input_for_ticker(
+                    candidate.ticker,
+                    candidate.asset_class,
+                    Decimal("0"),
+                    evaluation_by_key,
+                    is_new_from_watchlist=True,
+                )
+                if decision_input is not None:
+                    inputs.append(decision_input)
 
         return inputs
 
@@ -270,9 +321,19 @@ class DecisionService:
         blocked: set[str] | None = None,
         config: DecisionConfig = DEFAULT_CONFIG,
         persist: bool = True,
+        allow_watchlist_candidates: bool = False,
     ) -> RecommendationResult:
-        """Gera (e opcionalmente persiste) a recomendação de aporte v3."""
-        candidates = self.build_inputs_v3(portfolio_id)
+        """Gera (e opcionalmente persiste) a recomendação de aporte v3.
+
+        `allow_watchlist_candidates=True` (Sprint 25, Parte 2.5) inclui
+        candidatos novos da Watchlist/Radar já classificados como
+        "new_candidate" — sempre com teto de alocação reduzido
+        (`config.max_new_asset_weight`) e nunca substituindo o
+        comportamento padrão para quem não habilitar isso explicitamente.
+        """
+        candidates = self.build_inputs_v3(
+            portfolio_id, allow_watchlist_candidates=allow_watchlist_candidates
+        )
         policy, aggregates = self._policy_limits_and_aggregates(portfolio_id)
         result = recommend_v3(
             candidates, amount, blocked=blocked, config=config, policy=policy, aggregates=aggregates

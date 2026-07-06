@@ -60,3 +60,48 @@ def test_distribute_many_high_scores_sum_within_amount():
     assert total <= Decimal("3000")
     for a in allocs:
         assert a.amount <= Decimal("1500.00")  # 50% de 3000
+
+
+# --- Sprint 25, Parte 2.5: teto de alocação para ativo novo da Watchlist ---
+
+
+def test_apply_min_max_caps_new_asset_below_default_ticket():
+    # Sozinho, um ativo normal iria para o teto de 50%; um ativo novo da
+    # Watchlist é limitado a 25% (default de `max_new_asset_weight`).
+    weights = {"NEW": Decimal("1.0")}
+    result = _apply_min_max(weights, _cfg(), new_asset_tickers=frozenset({"NEW"}))
+    assert result["NEW"] == Decimal("0.25")
+
+
+def test_apply_min_max_new_asset_cap_does_not_affect_other_tickers():
+    weights = {"NEW": Decimal("0.5"), "OLD": Decimal("0.5")}
+    result = _apply_min_max(weights, _cfg(), new_asset_tickers=frozenset({"NEW"}))
+    assert result["NEW"] == Decimal("0.25")
+    assert result["OLD"] == Decimal("0.5")
+
+
+def test_select_and_distribute_single_new_asset_never_gets_full_amount():
+    """Requisito explícito: um ativo novo nunca recebe 100% do aporte por
+    padrão, mesmo sendo o único candidato elegível com o maior score."""
+    scores = [BuyScore("NEW", Decimal("1.0"), Decimal("1.0"), Decimal("0"), Decimal("1.0"), [])]
+    allocs = select_and_distribute(
+        scores, Decimal("1000"), _cfg(), new_asset_tickers=frozenset({"NEW"})
+    )
+    assert len(allocs) == 1
+    assert allocs[0].amount <= Decimal("250.00")
+
+
+def test_select_and_distribute_new_asset_cap_leaves_remainder_unallocated():
+    scores = [BuyScore("NEW", Decimal("1.0"), Decimal("1.0"), Decimal("0"), Decimal("1.0"), [])]
+    allocs = select_and_distribute(
+        scores, Decimal("1000"), _cfg(), new_asset_tickers=frozenset({"NEW"})
+    )
+    total = sum((a.amount for a in allocs), start=Decimal("0"))
+    assert total < Decimal("1000")
+
+
+def test_select_and_distribute_without_new_asset_tickers_keeps_old_behavior():
+    # frozenset() vazio (default) -> comportamento idêntico ao pré-Sprint 25.
+    scores = [BuyScore("ANY", Decimal("1.0"), Decimal("1.0"), Decimal("0"), Decimal("1.0"), [])]
+    allocs = select_and_distribute(scores, Decimal("1000"), _cfg())
+    assert allocs[0].amount == Decimal("500.00")  # teto padrão de 50%

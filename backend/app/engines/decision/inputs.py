@@ -59,6 +59,15 @@ class DecisionInput:
     # a engine só lê, nunca consulta banco.
     rule_signals: tuple[AllocationRuleSignal, ...] = ()
 
+    # --- Sprint 25, Parte 2.5 (Watchlist/Radar opcional no Aporte v3) -----
+    # True quando este candidato NÃO é uma posição existente — veio da
+    # Watchlist/Radar (classificado como "new_candidate") e o usuário
+    # habilitou explicitamente `allow_watchlist_candidates` nesta chamada.
+    # A engine usa isto só para aplicar o teto de alocação inicial mais
+    # conservador (`DecisionConfig.max_new_asset_weight`) — nunca para
+    # decidir elegibilidade ou pontuação (o score já reflete o Radar).
+    is_new_from_watchlist: bool = False
+
 
 @dataclass(frozen=True)
 class AllocationRuleSignal:
@@ -66,13 +75,27 @@ class AllocationRuleSignal:
     Engine v2) para uma dimensão aplicável a um candidato específico do
     Decision Engine 3.0 — usado para bônus de aporte e bloqueio, nunca para
     recomendar venda (ver `_gap_status`/regra de ouro em
-    `engines/target_allocation/engine.py`)."""
+    `engines/target_allocation/engine.py`).
+
+    `dimension_key`/`current_weight`/`max_weight`/`alert_message` foram
+    adicionados na Sprint 25 (Parte 1) para a mensagem de bloqueio do
+    Decision Engine 3.0 poder citar o limite e a fonte corretos — antes
+    dessa mudança, um bloqueio por regra detalhada (ex.: `class=fii`
+    `max_weight=25%`) usava, por engano, o limite genérico da Investment
+    Policy (`target_fii_max`) na mensagem exibida ao usuário, mesmo
+    quando uma regra mais específica já existia. Todos têm default para
+    não quebrar chamadas posicionais existentes com só os 5 campos
+    originais (o comportamento de bônus/gap não muda)."""
 
     dimension_type: str
     gap_status: str  # underweight | neutral | overweight | blocked
     contribution_priority: int
     rebalance_required: bool
     extreme_overweight: bool
+    dimension_key: str = ""
+    current_weight: Decimal = Decimal("0")
+    max_weight: Decimal | None = None
+    alert_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +131,12 @@ class DecisionConfig:
     min_single_weight: Decimal = Decimal("0.10")  # mín. 10% por ativo selecionado
     # Limite de concentração: ativo com peso atual acima disto não recebe aporte.
     over_concentration_limit: Decimal = Decimal("0.30")
+    # Sprint 25, Parte 2.5: teto de alocação inicial para um ativo NOVO vindo
+    # da Watchlist/Radar (`DecisionInput.is_new_from_watchlist=True`) — nunca
+    # 100% do aporte em um ativo em que o usuário ainda não tem posição,
+    # mesmo com score excelente. Dentro da faixa sugerida (10%-25%) pedida
+    # pelo usuário; editável, nunca aplicado a ativos já existentes na carteira.
+    max_new_asset_weight: Decimal = Decimal("0.25")
 
     def assets_for_amount(self, amount: Decimal) -> int:
         """Nº máximo de ativos conforme a faixa do aporte (Volume 7, seção 7)."""

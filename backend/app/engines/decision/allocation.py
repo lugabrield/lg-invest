@@ -37,8 +37,16 @@ def select_and_distribute(
     scores: list[BuyScore],
     amount: Decimal,
     config: DecisionConfig,
+    new_asset_tickers: frozenset[str] = frozenset(),
 ) -> list[Allocation]:
-    """Seleciona ativos e distribui o aporte respeitando os limites."""
+    """Seleciona ativos e distribui o aporte respeitando os limites.
+
+    `new_asset_tickers` (Sprint 25, Parte 2.5): tickers vindos da
+    Watchlist/Radar que ainda não são posição — recebem o teto mais
+    conservador `config.max_new_asset_weight` em vez do teto padrão
+    `config.max_single_weight`. Vazio por padrão: nenhum comportamento
+    muda para quem não usa `allow_watchlist_candidates`.
+    """
     if amount <= 0 or not scores:
         return []
 
@@ -63,9 +71,10 @@ def select_and_distribute(
         return []
 
     # Pesos proporcionais ao score, depois ajustados para respeitar os
-    # limites mínimo (10%) e máximo (50%) por ativo sem violá-los.
+    # limites mínimo (10%) e máximo (50%, ou o teto reduzido de ativo
+    # novo) por ativo sem violá-los.
     raw_weights = {s.ticker: (s.score / total_score) for s in selected}
-    final_weights = _apply_min_max(raw_weights, config)
+    final_weights = _apply_min_max(raw_weights, config, new_asset_tickers)
 
     allocations: list[Allocation] = []
     running = Decimal("0")
@@ -73,8 +82,9 @@ def select_and_distribute(
         if i < len(selected) - 1:
             value = _round_down_cents(amount * final_weights[s.ticker])
         else:
-            # Última posição recebe o resto, mas nunca acima do teto.
-            cap = _round_down_cents(amount * config.max_single_weight)
+            # Última posição recebe o resto, mas nunca acima do teto
+            # (o teto de ativo novo, se aplicável, prevalece).
+            cap = _round_down_cents(amount * _hi_for(s.ticker, config, new_asset_tickers))
             value = min(_round_down_cents(amount - running), cap)
         running += value
         allocations.append(Allocation(ticker=s.ticker, amount=value, buy_score=s.score))
@@ -82,25 +92,39 @@ def select_and_distribute(
     return allocations
 
 
-def _apply_min_max(weights: dict[str, Decimal], config: DecisionConfig) -> dict[str, Decimal]:
-    """Ajusta pesos para o intervalo [min, max] por ativo.
+def _hi_for(ticker: str, config: DecisionConfig, new_asset_tickers: frozenset[str]) -> Decimal:
+    """Teto máximo de peso para um ticker: o teto padrão, ou o teto
+    reduzido de ativo novo da Watchlist quando aplicável — nunca o maior
+    dos dois (o teto de ativo novo é sempre mais restritivo)."""
+    if ticker in new_asset_tickers:
+        return min(config.max_single_weight, config.max_new_asset_weight)
+    return config.max_single_weight
+
+
+def _apply_min_max(
+    weights: dict[str, Decimal],
+    config: DecisionConfig,
+    new_asset_tickers: frozenset[str] = frozenset(),
+) -> dict[str, Decimal]:
+    """Ajusta pesos para o intervalo [min, teto_por_ativo].
 
     Diferente de uma renormalização ingênua, aqui o teto máximo é
-    inviolável: pesos são limitados ao máximo e, se a soma ultrapassar
-    1.0, o excedente é cortado (a sobra fica não alocada e é reportada
-    como tal). Pesos abaixo do mínimo sobem ao mínimo.
+    inviolável: pesos são limitados ao teto (padrão ou reduzido, para
+    ativos novos da Watchlist) e, se a soma ultrapassar 1.0, o excedente
+    é cortado (a sobra fica não alocada e é reportada como tal). Pesos
+    abaixo do mínimo sobem ao mínimo.
     """
     lo = config.min_single_weight
-    hi = config.max_single_weight
+    hi_by_ticker = {t: _hi_for(t, config, new_asset_tickers) for t in weights}
 
-    clamped = {t: min(hi, max(lo, w)) for t, w in weights.items()}
+    clamped = {t: min(hi_by_ticker[t], max(lo, w)) for t, w in weights.items()}
     total = sum(clamped.values(), start=Decimal("0"))
 
     if total <= Decimal("1"):
         return clamped
 
     # Soma passou de 1.0: reduz proporcionalmente os pesos que estão
-    # acima do mínimo, mantendo o teto máximo, até a soma caber em 1.0.
+    # acima do mínimo, mantendo o teto de cada ativo, até a soma caber em 1.0.
     excess = total - Decimal("1")
     reducible = {t: w - lo for t, w in clamped.items() if w > lo}
     reducible_total = sum(reducible.values(), start=Decimal("0"))
@@ -110,5 +134,5 @@ def _apply_min_max(weights: dict[str, Decimal], config: DecisionConfig) -> dict[
     adjusted = dict(clamped)
     for t, room in reducible.items():
         cut = excess * (room / reducible_total)
-        adjusted[t] = max(lo, min(hi, clamped[t] - cut))
+        adjusted[t] = max(lo, min(hi_by_ticker[t], clamped[t] - cut))
     return adjusted
