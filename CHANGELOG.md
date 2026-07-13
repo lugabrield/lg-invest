@@ -3,6 +3,349 @@
 Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
+## [1.0.0] - LG INVEST Stable Local App (Sprint 31)
+
+### Contexto
+Sprint de finalização ("Release Candidate v1.0"), pedida explicitamente pelo usuário para fechar a LG INVEST como app local pronto para uso diário — não uma sprint de funcionalidade nova. Regras explícitas: nenhuma engine nova, nenhuma funcionalidade complexa nova, nenhum refatoração grande, nenhuma mudança de regra de negócio já validada. O número de versão passa a seguir SemVer de produto (`0.1.0` → `1.0.0`) em vez da numeração incremental por sprint usada até aqui (`1.37.0` foi a última sprint de UX); a partir daqui, `1.0.0` marca a primeira versão considerada pronta para uso real, e as próximas mudanças de versão devem refletir impacto para o usuário, não o número da sprint.
+
+### Corrigido
+- Teste flaky em `test_dividendos_me_client.py` — usava caminho relativo fixo em vez do fixture `tmp_path`, causando resíduo entre execuções; corrigido para usar `tmp_path` corretamente.
+- Bug real em `scripts/backup_database.py`: `shutil.copy2` preserva o mtime do arquivo de origem em cada cópia, então ordenar os backups por `st_mtime` para a lógica de `--keep-last` podia apagar o backup mais recente em vez do mais antigo; corrigido para ordenar pelo nome do arquivo (que embute o timestamp de criação com largura fixa).
+- 5 mensagens de erro que interpolavam o texto técnico bruto de exceções (rede/Yahoo Finance) diretamente na tela, em `configuracoes.py` e `ativos.py` — substituídas por mensagens amigáveis fixas, seguindo o padrão já usado em `sincronizar_dividendos_me.py` (nunca vazar detalhe de exceção não prevista).
+- Jargão técnico cru vazando para o usuário no motivo de bônus de alocação do Decision Engine v3 (`underweight na dimensão 'currency'`) — traduzido para linguagem de produto.
+- Versão hardcoded incorreta na sidebar ("LG INVEST v1.0 RC") — centralizada em `frontend/streamlit_app/version.py` como fonte única.
+
+### Adicionado
+- `scripts/backup_database.py` (novo) — backup do banco SQLite (`data/lg_invest.db` → `data/backups/lg_invest_YYYYMMDD_HHMMSS.db`), com `--keep-last N` opcional; 8 testes unitários novos em `backend/tests/unit/test_backup_database.py`.
+- Confirmação em duas etapas para três ações destrutivas que antes executavam imediatamente ao clique: "Limpar meta de alocação" e "Remover regra" (`configuracoes.py`), "Resetar para o default" de premissa de simulação (`configuracoes.py`) — mesmo padrão já usado para presets e para a sincronização do Dividendos.me.
+- `type="primary"` nos botões de ação principal de cada painel: "Atualizar tudo" (Dashboard), "Salvar alocação-alvo" e "Salvar premissa" (Configurações).
+- Empty state em Aporte (`aporte.py`) para carteira sem nenhum ativo cadastrado.
+- Documentação completa de release: `README.md` reescrito, `docs/USER_GUIDE.md`, `docs/INSTALLATION.md`, `docs/LOCAL_RUNBOOK.md`, `docs/TROUBLESHOOTING.md`, `docs/RELEASE_CHECKLIST.md`, `docs/RELEASE_NOTES_v1.0.md`.
+
+### Alterado
+- `pyproject.toml`: `version` de `0.1.0` para `1.0.0`; `description` ajustada para remover referência a "MVP".
+- `.gitignore`: adicionado `debug_dividendos_me/` e `debug_dividendos_me_*/` (snapshots de debug local, nunca artefato do produto).
+
+### Testes
+1192 testes passando (1184 da baseline + 8 novos do script de backup), 0 falhas. `alembic upgrade head` limpo (14 migrations). `ruff check .` e `black --check --fast .` limpos em 427 arquivos. Além da suíte automatizada, Parte 7 desta sprint rodou QA funcional ao vivo contra o banco de produção real (33 ativos, 6 candidatos na watchlist) usando chamadas não-destrutivas (`persist=False` no Decision Engine v3) para todas as telas/fluxos principais, incluindo o teste extremo de aporte de R$ 1.000.000 que reconfirmou o comportamento correto do Post-Allocation Constraints Engine (Sprint 29) contra dados reais.
+
+### Deixado de fora
+- Nenhuma engine nova, nenhuma mudança de regra de negócio do Decision Engine/Aporte v3/Dividendos.me, nenhuma mudança de banco além do já existente — conforme o freeze de features desta sprint.
+- Revisão de copywriting ponta-a-ponta (foi pontual, direcionada ao jargão técnico cru encontrado).
+- Testes automatizados de UI Streamlit (cobertura continua em services/engines).
+
+## [1.37.0] - Product Design / UX Polish — Onda 2: Ativos, Radar, Inteligência, Carteira, Simulação, Configurações + textos/empty states + docs (Sprint 30)
+
+### Contexto
+Continuação direta da Onda 1 ([1.36.0]), aplicando o mesmo Design System (`components/patterns.py`) ao restante do app, a pedido explícito do usuário ("Seguir para Onda 2 agora") logo após a entrega da Onda 1. Mesmas restrições da Onda 1 seguem valendo: nenhuma engine nova, nenhuma funcionalidade complexa nova, nenhuma mudança de cálculo ou regra de negócio — só camada de apresentação. Diferente da Onda 1 (Dashboard e Aporte v3 tiveram reformulação estrutural profunda, por pedido explícito), esta onda usou uma adoção mais leve e proporcional ao estado de cada tela: `page_header` + `empty_state` em todo lugar, e `metric_card_row`/`alert_box`/badges só onde havia um resumo numérico ou aviso estrutural que se beneficiava disso — preservando 100% da estrutura e lógica já existentes em cada tela. Ver `docs/UX_UI_GUIDE.md` (novo) para a descrição completa do Design System e o racional de cada escolha.
+
+### Adicionado
+- `docs/UX_UI_GUIDE.md` (novo) — documentação completa do Design System da Sprint 30: os 6 componentes de `patterns.py`, os 2 badges genéricos de `badges.py`, o layout global da sidebar, como cada uma das 9 telas foi tratada (e por quê a profundidade variou), o que deliberadamente não mudou, e um guia de 5 regras para quem for adicionar uma tela nova.
+- Configurações (`pages_impl/configuracoes.py`): reorganizada em `st.tabs` — Visão geral (explicação das 3 camadas + Limite efetivo por dimensão e conflitos), Alocação simples, Regras detalhadas, Política de investimento, Simulação, Sistema (ambiente, câmbio, atualização de preços) — no lugar de uma rolagem vertical única com sete seções separadas por `st.divider()`. Os três disclaimers repetidos de "nunca gera venda automática" migraram de `st.warning`/`st.info` para `warning_box`/`info_box`.
+- Radar (`pages_impl/radar.py`): resumo da Watchlist migrado de `st.metric` solto para `metric_card_row` — um card por estágio do funil (`watching`/`candidate`/`blocked`/`discarded`/`bought`) mais um card de "Dados insuficientes" calculado a partir da classificação real do Radar (não só `last_collected_at is None`).
+- Carteira (`pages_impl/carteira.py`): hero `metric_card_row` (patrimônio total convertido, total Brasil/BRL, total exterior, maior posição) com sinalizador visual de concentração quando a maior posição sozinha ultrapassa 20% da carteira — um indicador visual, não um limite de política (esse continua configurado em Configurações e aplicado pelo Decision Engine).
+- Simulação (`pages_impl/simulacao.py`): `info_box` explicando que o resultado é uma projeção probabilística, não uma previsão; os 4 `st.metric` de resultado (valor inicial, total aportado, mediana projetada, probabilidade de perda) migrados para `metric_card_row`, com a probabilidade de perda colorida por faixa (`critical` ≥ 30%, `attention` ≥ 10%, `positive` abaixo disso).
+- Sincronizar Dividendos.me (`pages_impl/sincronizar_dividendos_me.py`): status da integração migrado de `st.metric` solto para `metric_card_row` (credenciais configuradas, Playwright disponível, última sincronização com sucesso); avisos de credenciais/Playwright ausentes migrados para `info_box`.
+- Journal (`pages_impl/journal.py`) e Ativos/Inteligência (`pages_impl/ativos.py`, `pages_impl/inteligencia.py`): `page_header` + `empty_state` nos pontos sem dados (Journal: sem ativos, sem entradas, sem teses, sem tese para revisar; Ativos: sem ativos cadastrados; Inteligência: carteira vazia) — a estrutura rica já existente em Ativos (LG Score, Conviction Score v2, Análise Fundamentalista) e Inteligência (Resumo Executivo, buckets de classificação) não foi tocada, só o cabeçalho e os estados vazios.
+
+### Testes
+1184 testes passando (suíte inalterada — mesma confirmação da Onda 1: esta sprint é só camada de apresentação). Verificação final desta sprint incluiu, além do `ruff check`/`black --check` por arquivo, uma passada em todo o repositório (`ruff check .` e `black --check --fast .` limpos em 424 arquivos) e um smoke test importando as 9 telas mais `app.py` e os módulos do Design System juntos, confirmando que a navegação inteira do app carrega sem erro.
+
+### Deixado de fora
+- Padronização de texto/jargão técnico → linguagem de produto em TODO o app — foi aplicada de forma pontual (os disclaimers de "nunca vende automaticamente" e alguns avisos estruturais), não como uma varredura textual completa de cada tela. Uma revisão de texto ponta-a-ponta fica como trabalho futuro, se o usuário quiser aprofundar depois de fechar a v1.0.
+- Nenhuma mudança de engine, cálculo ou regra de negócio — confirmado pela suíte de testes inalterada, igual à Onda 1.
+
+## [1.36.0] - Product Design / UX Polish — Onda 1: Design System + Dashboard + Aporte v3 (Sprint 30)
+
+### Contexto
+Sprint de design/UX pedida explicitamente pelo usuário para a LG INVEST parar de "parecer um protótipo Streamlit" e passar a parecer um produto financeiro premium — sem fechar a v1.0 ainda e sem criar engine nova ou funcionalidade complexa nova (só reorganização visual/estrutural sobre dados e regras já existentes). O escopo total tem 14 partes (design system + 9 telas + textos/espaçamento/empty states + docs); o usuário escolheu entregar em ondas, começando por **Onda 1: Design System + Dashboard + Aporte v3**. As telas Ativos, Radar, Inteligência, Carteira, Simulação e Configurações, além da padronização de textos/empty states e da documentação de design, ficam para as próximas ondas.
+
+### Adicionado
+- `frontend/streamlit_app/components/patterns.py` (novo) — Design System interno: `page_header` (título + descrição + status opcional, padrão de topo de página), `metric_card`/`metric_card_row` (MetricCard "premium" com faixa de status colorida, usado no hero do Dashboard), `alert_box`/`success_box`/`info_box`/`warning_box`/`error_box` (WarningBox/InfoBox/SuccessBox com título destacado, no lugar do `st.warning`/`st.info` genérico), `recommendation_card` (card de ativo recomendado para o Aporte v3), `data_quality_box` (disponível/ausente/confiança/impacto), `empty_state` (tela ou seção sem dados, com CTA opcional).
+- `components/badges.py`: `status_badge_html()` (StatusBadge genérico cobrindo as 9 chaves pedidas: bom/atenção/crítico/dados insuficientes/atualizado/desatualizado/bloqueado/monitorando/candidato) e `risk_badge_html()` (badge de risco agregado da carteira, centralizando uma paleta que antes vivia duplicada dentro de `dashboard.py`).
+- `styles/custom_css.py`: bloco novo de CSS centralizado para todos os componentes acima (`.lg-page-header`, `.lg-metric-card-row`/`.lg-metric-card`, `.lg-alert-box`, `.lg-recommendation-card`, `.lg-data-quality-box`, `.lg-empty-state`, `.lg-sidebar-group-label`/`.lg-sidebar-footer`) — nenhuma tela injeta `<style>` própria.
+- `app.py`: sidebar reorganizada em 3 grupos (Principal: Dashboard/Carteira/Aporte; Análise: Inteligência/Ativos/Radar/Simulação/Journal; Operação: Sincronizar Dividendos.me/Configurações) e rodapé fixo com versão ("LG INVEST v1.0 RC"), ambiente ("Local") e última sincronização com o Dividendos.me (lida de `ExternalSyncRun`, nunca derruba o app se a consulta falhar).
+- Dashboard (`pages_impl/dashboard.py`): área hero no topo com `metric_card_row` (Patrimônio total, Variação, Exposição internacional, Portfolio Health Score, Risco da carteira, Próximo aporte sugerido); seção nova **"Decisão do mês"** (melhor oportunidade pelo LG Conviction Score v2 + botão "Simular aporte"); seção **"Alertas"** consolidando avisos que antes apareciam espalhados pela tela (preço automático baixo, dados insuficientes, preços manuais/estimados, sincronização nunca feita); "Composição" renomeada para **"Alocação"**, com a nota de classe mais subalocada movida para lá; "Central de Dados" agora vive dentro de um `st.expander` recolhido por padrão, com a última atualização visível discretamente no próprio título.
+- Aporte v3 (`pages_impl/aporte.py`): resultado passou de tabela para **cards por ativo** (`recommendation_card`): ticker, valor sugerido, % do aporte, tag "Já tenho"/"Novo candidato", motivo principal em destaque, badges de LG Score/Conviction/confiança do dado — motivos extras e o breakdown do score ficam num expander "Ver detalhes técnicos" por ativo. Alertas do motor (incluindo o aviso de aporte grande) e o "Saldo não alocado" agora usam `warning_box` em vez de `st.warning`/`st.caption` genérico.
+
+### Alterado
+- `dashboard.py`: removidos os dicionários locais `_RISK_COLOR` (duplicava `badges.py`) e a lógica de badge de risco ad-hoc — agora usa `risk_badge_html()`. `top_opportunities`/`top_risks`/`insufficient` calculados uma única vez (antes eram recalculados dentro de "Oportunidades & Riscos", agora também alimentam o hero e "Decisão do mês").
+- `aporte.py`: `_item_row`/`_item_expander_entries` (geravam a tabela antiga) substituídos por `_render_item_card()`.
+
+### Testes
+1184 testes passando (suíte inalterada — esta sprint é só camada de apresentação, nenhuma engine/service mudou). `ruff check` e `black --check` limpos em todos os arquivos tocados.
+
+### Deixado de fora (próximas ondas)
+- Telas Ativos, Radar, Inteligência, Carteira, Simulação, Configurações — ainda com o layout anterior.
+- Padronização de textos técnicos → linguagem de produto em toda a aplicação (Parte 11) e empty states dedicados (Parte 13) — os componentes (`empty_state`) já existem, mas ainda não foram aplicados fora do Design System em si.
+- `docs/UX_UI_GUIDE.md` e atualização de `docs/USER_GUIDE.md`/`docs/INVESTMENT_DECISION_SYSTEM.md` (Parte 15).
+- Nenhuma mudança de engine, cálculo ou regra de negócio — confirmado pela suíte de testes inalterada.
+
+## [1.35.0] - Post-Allocation Constraints Engine (Sprint 29)
+
+### Contexto
+Bug crítico relatado pelo usuário via teste extremo: simular um aporte de R$ 1.000.000 numa carteira de ~R$ 40.000 fez o Decision Engine v3 recomendar quase tudo em ativos internacionais — "Exposição internacional depois: 97,23%" com o máximo de USD configurado em 60%. Causa raiz: o Decision Engine v3 só verificava sobreconcentração ANTES do aporte (`eligibility.py`) e limitava cada ativo como fração DO PRÓPRIO APORTE (`allocation.py`, `max_single_weight=50%`), nunca como fração do patrimônio RESULTANTE — um aporte grande o suficiente sempre conseguia estourar qualquer limite configurado. Esta sprint adiciona uma camada final de proteção: o Post-Allocation Constraints Engine simula o patrimônio depois do aporte e corta proporcionalmente qualquer dimensão (classe/moeda/país/ativo/exposição internacional) que ultrapassaria seu máximo configurado, deixando o saldo excedente genuinamente não alocado — nunca forçando 100% de alocação e nunca sugerindo venda. Ver `docs/POST_ALLOCATION_CONSTRAINTS.md` para a explicação completa com a fórmula e o exemplo numérico do bug.
+
+### Adicionado
+- `backend/app/engines/decision/post_allocation.py` — Post-Allocation Constraints Engine puro: `apply_post_allocation_constraints()` agrupa a distribuição inicial (já decidida por `select_and_distribute`) por dimensão, calcula o "espaço" (`room`) em R$ ainda disponível em cada dimensão sem ultrapassar o máximo configurado pós-aporte, e corta proporcionalmente (water-filling iterativo, máx. 25 iterações) qualquer grupo que exceda esse espaço. Mesma precedência de limites já estabelecida em `eligibility.py` (Sprint 25, Parte 1): regra detalhada do Target Allocation Rule Engine v2 sempre antes da Investment Policy para a mesma dimensão.
+- `schemas/recommendation_result.py`: `CappedDimensionResult` (dimension_type, dimension_key, label, weight_before, weight_after, max_weight, source) + campo `RecommendationResult.capped_dimensions` — lista das dimensões que precisaram de corte, vazia quando nenhuma simulação pós-aporte foi possível ou nenhum limite foi atingido.
+- `recommend_v3()` ganhou o parâmetro opcional `portfolio_value_before: Decimal | None` — quando ausente, a simulação pós-aporte simplesmente não roda (nunca inventa um patrimônio). `DecisionService._policy_limits_and_aggregates()` agora retorna também o patrimônio atual (`view.total_converted_brl`) para alimentar essa simulação.
+- Alertas de aporte grande/extremo em `recommend_v3`: aporte > 25% do patrimônio atual gera "Este aporte é grande em relação ao patrimônio atual. A recomendação foi limitada por regras de alocação pós-aporte."; aporte > 100% do patrimônio atual gera "Aporte maior que a carteira atual. A simulação muda drasticamente a alocação e pode exigir uma estratégia de entrada gradual."
+- Tela Aporte (`pages_impl/aporte.py`): seções **"Limites pós-aporte atingidos"** (tabela dimensão/item/peso atual/peso depois/limite máximo/origem/status) e **"Saldo não alocado"** (valor alocado vs. não alocado + motivo), visíveis sempre que `result.capped_dimensions` não está vazio.
+- `docs/POST_ALLOCATION_CONSTRAINTS.md` (novo).
+- Testes novos: `backend/tests/unit/test_post_allocation_constraints.py` (7 cenários de engine pura, números exatos calculados à mão — inclui o cenário exato do bug relatado, confirmando USD fecha em 60,0% e nunca mais 97,23%) e `backend/tests/unit/test_decision_service_v3_post_allocation.py` (7 cenários ponta-a-ponta via `DecisionService.recommend_v3`, verificando invariantes já que os pesos exatos dependem do câmbio configurado e do LG Score real). Total: 13 cenários cobrindo a especificação completa do usuário.
+
+### Alterado
+- `backend/app/engines/decision/engine.py` — `recommend_v3()` chama `apply_post_allocation_constraints()` depois de `select_and_distribute()`, propaga `capped_dimensions` no `RecommendationResult` e anexa os motivos de cada corte aos `alerts` (nunca um bloqueio silencioso).
+- `backend/app/services/decision_service.py` — `_policy_limits_and_aggregates()` retorna `(PolicyLimits, PortfolioAggregates, Decimal)` em vez de uma tupla de 2; `recommend_v3()` (serviço) passa `portfolio_value_before` para a engine.
+- `frontend/streamlit_app/pages_impl/aporte.py` — duas seções novas (ver acima).
+
+### Testes
+1184 testes passando (1170 do fim do Sprint 28 + 14 novos desta sprint). `ruff check .` e `black --check .` limpos em todo o código.
+
+### Deixado de fora
+- Redistribuição do valor cortado para outros ativos elegíveis — pedido explícito do usuário: "Não forçar alocação só para chegar em 100%." O saldo excedente fica não alocado, com o motivo sempre explicado.
+- Corte pós-aporte em `recommend()` (v1) e `recommend_v2()` — só o v3 recebe `policy`/`aggregates`/`portfolio_value_before` do `DecisionService`; v1/v2 permanecem exatamente como estavam.
+
+## [1.34.0] - Diagnóstico e Cobertura de Dados Fundamentalistas (Sprint 28)
+
+### Contexto
+Mesmo depois da Central de Dados (Sprint 27), a Análise Fundamentalista continuava mostrando confiança baixa para vários ativos — caso real relatado: `ALUP4.SA` com "Valuation Indeterminado, Confiança baixa, Dados insuficientes para estimar valor justo" e "FCF histórico fora da faixa". O diagnóstico desta sprint confirmou que a causa é cobertura de dado, não bug de cálculo: o Yahoo Finance simplesmente não cobre vários campos fundamentalistas para boa parte das ações brasileiras. Esta sprint constrói o Data Coverage Report (disponibilidade campo a campo + score de completude por finalidade), expõe isso na UI (Ativos e Central de Dados), cria um fallback de importação manual de fundamentos (CSV/Excel) e faz o Decision Engine v3 explicar exatamente o que falta — nunca mais um "confiança baixa" sem explicação.
+
+### Adicionado
+- `backend/app/engines/data_coverage/` (`engine.py` + `thresholds.py`) — Data Coverage Engine puro: disponibilidade de 19 campos de snapshot + 4 campos sintéticos (preço atual, histórico de preço/dividendos/crescimento), e score de completude 0-100 por finalidade (`quality`/`valuation`/`trap_detection`/`income`/`decision_engine`), com os grupos de campos deliberadamente espelhando o que cada engine consumidora (Quality/Valuation Engine 2.0/Trap Detection/Análise de Renda) realmente usa — nunca uma lista reimplementada à parte.
+- Penalidade por dado desatualizado: `STALE_DATA_THRESHOLD_DAYS=400`, `STALE_DATA_SCORE_FACTOR=0.85` — um snapshot coletado há mais de ~13 meses reduz o score do `decision_engine` e o motivo explica a idade exata do dado.
+- `backend/app/services/data_coverage_service.py` — `DataCoverageService.evaluate_ticker(ticker)`, a ponte com o banco (lê `FundamentalSnapshot`/`Price` reais, roda o Fundamentals Engine para os CAGRs).
+- `backend/app/schemas/data_coverage.py` — `FieldAvailability`, `CoveragePurposeScore`, `DataCoverageResult`, `most_missing_fields()`.
+- Bloco **"Dados usados e dados ausentes"** na tela Ativos → "Análise Fundamentalista": resumo, 5 métricas de cobertura por finalidade, campos disponíveis (com fonte e data) e campos ausentes (com impacto).
+- Resumo de cobertura na Central de Dados: depois de "Fundamentos da carteira", o resumo mostra contagem de ativos com cobertura suficiente/parcial/insuficiente e os campos mais ausentes.
+- **Importação Manual de Fundamentos** — fallback para quando o Yahoo Finance não cobre um campo:
+  - `backend/app/schemas/fundamentals_import.py`, `backend/app/etl/validators/fundamentals_import_validators.py`, `backend/app/services/fundamentals_import_service.py` — `FundamentalsImportService.import_file()`: valida linha a linha (erro numa linha não aborta o arquivo), nunca cria `Asset` novo, nunca sobrescreve um snapshot existente sem `confirm_overwrite=True` explícito (linha fica `conflict_pending_confirmation`), grava sempre com `source="manual_import"`, e recomputa valuation/traps/scores dos tickers efetivamente alterados (reaproveitando `DataRefreshService._recompute_analysis`).
+  - `FundamentalsRepository.upsert_fields()` — só altera as colunas presentes no arquivo, nunca zera um campo já existente que não veio na linha importada.
+  - `"manual_import"` adicionado a `FUNDAMENTALS_SOURCES`.
+  - Bloco **"Importar fundamentos manualmente (CSV/Excel)"** na tela Ativos: baixar modelo CSV, upload, checkbox de confirmação de sobrescrita, resumo pós-importação.
+- **Data quality no Decision Engine v3** — `DecisionService` agora consulta o Data Coverage Report de cada ticker e, quando a cobertura para o `decision_engine` é parcial ou insuficiente, aplica uma penalidade de confiança real (`_COVERAGE_PARTIAL_CONFIDENCE_PENALTY=0.05`, `_COVERAGE_INSUFFICIENT_CONFIDENCE_PENALTY=0.10` — calibradas na mesma escala do Trap Detection Engine) e gera um aviso explícito listando os campos que faltam, nunca mais um "confiança baixa" genérico.
+- `docs/DATA_COVERAGE_REPORT.md`, `docs/FUNDAMENTAL_DATA_PROVIDERS.md`, `docs/MANUAL_FUNDAMENTALS_IMPORT.md` (novos).
+- Testes novos: `backend/tests/unit/test_data_coverage_engine.py` (10), `backend/tests/unit/test_data_coverage_service.py` (5), `backend/tests/unit/test_fundamentals_import_service.py` (11), mais cenários de cobertura/staleness em `test_decision_fundamental_signals.py`, cenário de resumo de cobertura em `test_data_refresh_service.py`, e cenário de falha de fonte preservando dado antigo em `test_fundamentals_service.py`.
+
+### Alterado
+- `frontend/streamlit_app/pages_impl/dashboard.py` — resumo de execução da Central de Dados ganhou a linha de cobertura de dados (suficiente/parcial/insuficiente + campos mais ausentes).
+- `frontend/streamlit_app/pages_impl/ativos.py` — nova seção de dados ausentes + importação manual dentro de "Análise Fundamentalista".
+- `backend/app/services/decision_service.py` — penalidade de confiança e aviso explícito por baixa cobertura de dados (ver acima).
+- `backend/app/schemas/data_refresh.py` — `AssetRefreshOutcome` ganhou `data_completeness_score`/`missing_fields`; `PortfolioFundamentalsRefreshResult` ganhou `coverage_sufficient`/`coverage_partial`/`coverage_insufficient`/`most_missing_fields` (todos `@property` derivados dos `outcomes` reais).
+- `docs/FUNDAMENTALS_ENGINE.md`, `docs/VALUATION_ENGINE_2.md`, `docs/DATA_REFRESH_CENTER.md`, `docs/FUNDAMENTAL_ANALYSIS_UI.md` — atualizados com as novidades desta sprint.
+
+### Testes
+1169 testes coletados (1134 do fim do Sprint 27 + ~35 novos desta sprint), 1168 passando. `ruff check .` e `black --check .` limpos em todo o código desta sprint. A única falha é pré-existente e sem relação com esta sprint: `test_dividendos_me_client.py::test_diagnose_income_page_debug_mode_never_raises_when_screenshot_fails` (flake dependente de escrita de arquivo de debug-screenshot específica deste sandbox, confirmada via `git log` como já presente antes do início do Sprint 28).
+
+### Deixado de fora
+- Nenhuma fonte de dado fundamentalista nova além do Yahoo Finance e da importação manual (Fundamentus, Status Invest, CVM/B3, Dividendos.me como fonte de fundamentos) — a arquitetura plugável (`FundamentalsProvider`) já suporta adicionar sem reescrever os serviços, documentado em `docs/FUNDAMENTAL_DATA_PROVIDERS.md`.
+- Nenhum "roteador" automático entre múltiplas fontes de fundamentos — hoje é sempre Yahoo (automático) + importação manual (sob demanda do usuário).
+- Edição de um campo já importado diretamente pela UI, sem reimportar o arquivo — a correção de um valor importado exige reimportar a linha certa (com confirmação).
+- Importação em lote de múltiplos arquivos, ou agendamento de importação recorrente.
+
+## [1.33.0] - Central de Dados / Data Refresh Center (Sprint 27)
+
+### Contexto
+Até esta sprint, atualizar preço ou fundamentos de um ativo só era possível ativo a ativo, na tela Ativos — não havia um jeito de, com um clique, atualizar a carteira inteira (ou a watchlist inteira) e recomputar de uma vez as análises que dependem desses dados (Valuation Engine 2.0, Trap Detection, LG Score, Conviction Score). Atualizar tudo automaticamente a cada carregamento de página nunca foi uma opção real — deixaria o Streamlit lento, geraria chamadas excessivas ao Yahoo Finance e arriscaria salvar dado incompleto no meio de um rerender. Esta sprint constrói a "Central de Dados": uma seção manual no Dashboard com 5 botões (preços da carteira, fundamentos da carteira, watchlist, tudo, e limpar cache), orquestrados por um novo `DataRefreshService` que reaproveita — nunca duplica — os serviços já existentes. Nenhuma engine nova foi criada: a sprint é inteiramente de orquestração e UI.
+
+### Adicionado
+- `backend/app/schemas/data_refresh.py` — `AssetRefreshOutcome` (resultado por ativo, com vocabulário de status `updated`/`insufficient_data`/`not_applicable`/`skipped_manual`/`failed`), `PortfolioPriceRefreshResult`, `PortfolioFundamentalsRefreshResult`, `WatchlistRefreshResult`, `FullRefreshResult` e `LastRefreshStatus`. As contagens agregadas (`processed`, `updated`, `failed`, `valuation_recalculated` etc.) são sempre `@property` somadas a partir da lista real de `outcomes` — nunca um contador mantido à parte que possa divergir.
+- `backend/app/services/data_refresh_status_service.py` — persistência simples em JSON (`data/refresh_status.json`, mesmo padrão de `fx_settings_service.py`) dos timestamps "última atualização" por rotina (preços/fundamentos/watchlist/valuation/trap detection/cache) e do resumo da última execução de cada botão.
+- `backend/app/services/data_refresh_service.py` — `DataRefreshService`, o orquestrador central:
+  - `refresh_portfolio_prices(portfolio_id)` — só ativos com `Position` na carteira (via `MarketDataService`); nunca toca a watchlist.
+  - `refresh_portfolio_fundamentals(portfolio_id)` — coleta fundamentos (`FundamentalsService`) e sempre tenta recomputar, por classe do ativo, Trap Detection + (Valuation Engine 2.0 para ações | Análise de Renda Imobiliária para FII/REIT | Adequação de Carteira para ETF/cripto/Tesouro) + LG Score + Conviction Score.
+  - `refresh_watchlist_data(portfolio_id)` — garante o cadastro mestre do ativo (via `WatchlistService.collect_data_for_asset`), coleta preço/fundamentos e recomputa scores; `positions_created` é calculado a partir da contagem real de `Position` antes/depois da rotina (nunca hardcoded), para que uma regressão futura seja pega pelos testes, não só prometida em comentário.
+  - `refresh_all_investment_data(portfolio_id)` — as três rotinas acima em sequência.
+  - `get_last_refresh_status()` — lê o status persistido.
+- Seção **"Central de Dados"** no Dashboard (`frontend/streamlit_app/pages_impl/dashboard.py`), logo após "Visão Geral": os 5 botões descritos acima, bloco "Última atualização" (5 timestamps) e um "Resumo da última execução" (processados/atualizados/dados insuficientes/falhas/fontes/valuation recalculado/traps recalculadas/scores recalculados, mais posições criadas e patrimônio alterado no caso da watchlist). O botão "Atualizar tudo" exige confirmação explícita em duas etapas antes de rodar. O botão "Limpar cache" só chama `clear_all_caches()` — nunca busca dado externo.
+- `docs/DATA_REFRESH_CENTER.md` — documentação completa da Central de Dados.
+- `backend/tests/unit/test_data_refresh_service.py` — 24 testes cobrindo: preços/fundamentos da carteira nunca tocam a watchlist; ativo manual é pulado; falha num ativo nunca derruba o lote; watchlist nunca cria `Position` nem altera patrimônio (mesmo sob falha total do provider); watchlist exclui candidatos `discarded`; fundamentos nunca chamam Valuation Engine 2.0 para FII/REIT nem Análise de Renda Imobiliária para ações; ETF/cripto/Tesouro nunca usam valuation tradicional; dado ausente vira `insufficient_data`, nunca inventado; timestamps de última atualização são gravados; construir o serviço não dispara nenhuma chamada de rede.
+
+### Alterado
+- `frontend/streamlit_app/pages_impl/dashboard.py` — o antigo botão único "🔄 Atualizar dados" (só `clear_all_caches()` + rerun) foi substituído pela Central de Dados completa; a ação equivalente continua existindo como o botão "🧹 Limpar cache".
+
+### Documentação
+- `docs/DATA_REFRESH_CENTER.md` (novo).
+
+### Testes
+1134 testes passando (1110 do fim do Sprint 26 + 24 novos desta sprint), `ruff check .` e `black --check .` limpos.
+
+### Deixado de fora
+- Fontes de dado adicionais (Fundamentus, Status Invest, CVM/B3, Dividendos.me como fonte de preço/fundamentos) — a arquitetura (provider injetado no serviço) já permite adicionar sem reescrever o `DataRefreshService`, mas nenhuma foi implementada nesta sprint.
+- Execução em background/assíncrona — cada botão roda de forma síncrona (bloqueante) dentro do próprio request do Streamlit, com spinner; não há fila de jobs nem progresso incremental por ativo.
+- Agendamento automático (rodar a Central de Dados sozinha em um horário fixo) — deliberadamente fora de escopo: a atualização é sempre manual, por decisão explícita registrada no início da sprint.
+
+## [1.32.0] - Análise Fundamentalista Avançada e Valuation Engine 2.0 (Sprint 26)
+
+### Contexto
+A plataforma sempre teve um Valuation Engine v1 (bandas fixas de múltiplo único, sem faixa de valor justo numérica — ver `docs/VALUATION_ENGINE.md`) e nenhuma proteção explícita contra armadilhas clássicas de valuation ("P/L baixo = barato" sem checar se o lucro é sustentável, "DY alto = renda boa" sem checar estabilidade). FIIs/REITs e ETFs/cripto/Tesouro também não tinham nenhuma análise fundamentalista própria — apenas o proxy genérico de preço do LG Score. Esta sprint constrói, em 8 fases sequenciais com testes verdes em cada checkpoint: dados expandidos (ROIC, cobertura de juros), o Valuation Engine 2.0 (DCF + múltiplos + Graham, faixa de valor justo, só ações), o Trap Detection Engine (7 flags nomeados, ações + FIIs/REITs), a Análise de Renda Imobiliária (P/VP + DY + estabilidade, FIIs/REITs), a Adequação de Carteira (ETF/cripto/Tesouro, sem valuation tradicional), a integração de tudo isso ao Decision Engine 3.0 (via penalidade de confiança, nunca peso novo no score) e a exposição completa na UI (nova seção "Análise Fundamentalista" em Ativos). Como em toda a plataforma: nunca uma recomendação de compra/venda, nunca um dado inventado — dado insuficiente sempre vira a mensagem literal "Dados insuficientes para estimar valor justo com confiança.", nunca uma aproximação.
+
+### Adicionado — dados expandidos (Fase 1)
+- `FundamentalSnapshot`/`FundamentalSnapshotResult` ganharam `total_equity`, `roic` (`NOPAT / capital investido`) e `interest_coverage` (`EBIT / despesa financeira`) — migration `d8a2f5c7b104_add_fundamentals_roic_fields`, puramente aditiva. Só calculados a partir do histórico anual real (`get_history()`); `.info` do yfinance não expõe os componentes com confiança suficiente. `coverage_pct`/`missing_fields` agora consideram 30 campos (antes 27).
+
+### Adicionado — Valuation Engine 2.0 (Fase 2, ações)
+- Pacote `engines/valuation_v2/` (`constants`, `dcf`, `multiples`, `graham`, `reverse_dcf`, `engine`), schema `ValuationV2Result` e `ValuationServiceV2`. Combina DCF simplificado de 2 estágios em 3 cenários (CAPM simplificado, premissas macro isoladas e documentadas por moeda), múltiplos normalizados pela MÉDIA HISTÓRICA DO PRÓPRIO ATIVO (nunca banda fixa arbitrária) e Graham Number como checagem de sanidade (nunca método primário) numa faixa de valor justo (`fair_value_range.low/base/high`) — nunca um ponto único.
+- Margem de segurança exigida escalada pela qualidade do ativo (15%/25%/35%/30%). Classificação `subvalorizado`/`valor_justo`/`sobrevalorizado`/`indeterminado`. Reverse DCF (`implied_growth_rate`, por bisseção) expõe a expectativa de crescimento que o preço atual já embute. Confiança "alta" exige 2+ métodos, dispersão baixa entre eles e 3+ períodos de histórico.
+- Escopo restrito a `asset_class == "stock"` — todas as demais classes voltam `indeterminado` com motivo explícito. Ver `docs/VALUATION_ENGINE_2.md`.
+
+### Adicionado — Trap Detection Engine (Fases 3-4, 7 flags)
+- Pacote `engines/trap_detection/` (`thresholds`, `detectors`, `engine`), schema `TrapDetectionResult`/`TrapFlag` e `TrapDetectionService`. 5 detectores para ações (Armadilha do P/L baixo, Armadilha do P/VP baixo, Crescimento supervalorizado, Alavancagem elevada, Dado insuficiente para confiança) + 2 para FIIs/REITs (Dividend Yield muito alto, Pico de yield não recorrente) — cada um exige pelo menos 2 sinais concordando, nunca um múltiplo baixo isolado.
+- `confidence_penalty` por severidade (baixa=0,05 / média=0,10 / alta=0,20), somada e capada em 1,0 — quem consome subtrai da confiança existente, nunca os flags bloqueiam ou recomendam ação diretamente. Ver `docs/TRAP_DETECTION_ENGINE.md`.
+
+### Adicionado — Análise de Renda Imobiliária (Fase 4, FIIs/REITs)
+- Pacote `engines/income_real_estate/` (`thresholds`, `stability`, `engine`), schema `IncomeRealEstateAnalysisResult` e `IncomeRealEstateService`. Combina P/VP, Dividend Yield e estabilidade do DY histórico (coeficiente de variação do próprio ativo) — nunca DCF, nunca P/L (não são métricas relevantes para fundos). REITs usam a mesma leitura de FIIs com aviso explícito da limitação de FFO/AFFO (não coletado) e confiança nunca "alta". Ver `docs/INCOME_REAL_ESTATE_ANALYSIS.md`.
+
+### Adicionado — Adequação de Carteira (Fase 5, ETF/cripto/Tesouro)
+- `engines/portfolio_adequacy/engine.py`, schema `PortfolioAdequacyResult` e `PortfolioAdequacyService`. ETF, cripto e Tesouro Direto não têm valuation tradicional aplicável neste projeto — em vez de fabricar um "preço justo" sem dado real, esta análise responde "esta posição está adequada à minha política de alocação?", reaproveitando literalmente o Target Allocation Rule Engine v2 (Sprint 24), com precedência regra de ativo > regra de classe. Ver `docs/PORTFOLIO_ADEQUACY_ENGINE.md`.
+
+### Alterado — Decision Engine 3.0 (Fase 6)
+- `DecisionInput` ganhou `fundamental_warnings: tuple[str, ...]`. `DecisionService._fundamental_signals_for_ticker()` consulta Trap Detection Engine (sempre) e Valuation Engine 2.0 (só ações) e devolve `(confidence_penalty, warnings)`; a penalidade é subtraída de `DecisionInput.confidence` NA ORIGEM, então se propaga automaticamente pelo mecanismo já existente "confiança baixa reduz score" — nenhum peso novo em `scoring.py`. Avisos viram texto em `reasons`, prefixados "Atenção (análise fundamentalista): ". Nunca bloqueia, nunca menciona venda (testado). Ver `docs/DECISION_ENGINE_3.md`, seção "Sprint 26, Fase 6".
+
+### Alterado — UI (Fase 7, tela Ativos)
+- Nova seção "🔬 Análise Fundamentalista": roteia por classe de ativo para exatamente um bloco (Valuation Engine 2.0 para ações; Análise de Renda Imobiliária para FII/REIT; Adequação de Carteira para ETF/cripto/Tesouro), mais um bloco de flags do Trap Detection Engine sempre que aplicável. `ativos.render()` passou a receber `portfolio_id` (necessário para a Adequação de Carteira).
+- 4 badges novos em `components/badges.py`: `valuation_status_badge_html`, `income_real_estate_status_badge_html`, `adequacy_status_badge_html`, `trap_severity_badge_html` — reaproveitando a paleta semântica já existente. Ver `docs/FUNDAMENTAL_ANALYSIS_UI.md`.
+
+### Documentação
+- 7 documentos: `docs/VALUATION_ENGINE_2.md`, `docs/TRAP_DETECTION_ENGINE.md`, `docs/INCOME_REAL_ESTATE_ANALYSIS.md`, `docs/PORTFOLIO_ADEQUACY_ENGINE.md`, `docs/FUNDAMENTAL_ANALYSIS_UI.md` (novos) e `docs/DECISION_ENGINE_3.md`, `docs/FUNDAMENTALS_ENGINE.md` (atualizados).
+
+### Testes
+- Suíte completa: **1110 testes passando**, 0 falhas. `ruff check` e `black --check --fast` limpos em todo o repositório.
+
+### Deixado de fora desta rodada
+- Nenhuma tela mostra a evolução da Análise Fundamentalista ao longo do tempo (histórico) — só o resultado da consulta mais recente.
+- Nenhum gráfico (Plotly) para a faixa de valor justo ou para a série histórica de DY nesta seção — só métricas e texto.
+- Premissas macro do DCF (risk-free rate, equity risk premium) são proxies fixos, sem atualização automática — revisão manual periódica recomendada.
+
+## [1.31.0] - Explicabilidade do Aporte v3 (Sprint 25, Parte 4)
+
+### Contexto
+Último item do backlog aprovado da Sprint 25 (Ajuste Watchlist/Radar → status → Proventos históricos → UX Configurações/alocação → **Explicabilidade Aporte v3**, agora os 4 concluídos). Os motores de score do Decision Engine (v1/v2/v3) sempre calcularam a contribuição de cada fator internamente e já a expunham como frase em `reasons`, mas nunca de forma estruturada — a UI não tinha como desenhar um gráfico da composição do score, só mostrar texto corrido. Da mesma forma, `IgnoredItem.reason` já explicava por que um ativo foi bloqueado, mas não indicava de forma legível-por-máquina qual camada gerou o bloqueio (manual, sobreconcentração, regra detalhada ou política geral). Esta entrega expõe essa informação já calculada de forma estruturada, sem alterar nenhuma fórmula de score, filtro de elegibilidade ou precedência de limites — é uma entrega de explicabilidade/UX, não de decisão.
+
+### Adicionado — `score_breakdown` estruturado (`schemas/recommendation_result.py`, `engines/decision/scoring.py`)
+- Novo `ScoreFactor` (Pydantic: `label`, `weight`, `value`, `contribution`) e `ScoreFactorRaw` (dataclass puro, sem Pydantic, usado dentro da engine) — um item por fator do score de compra.
+- `compute_buy_score`/`compute_buy_score_v2`/`compute_buy_score_v3` agora populam `BuyScore.factors` com a mesma decomposição já usada para montar `reasons`, em vez de só texto: v1 (LG Score/Gap de alocação/Concentração invertida), v2 (Qualidade/Bônus classe subalocada/Concentração invertida), v3 (Fundamentos/Bônus alocação-alvo/Concentração invertida/Bônus internacional/Ajuste por confiança do dado).
+- A linha "Ajuste por confiança do dado" (só no v3) tem `weight=None` porque o fator de confiança não soma ao score, ele ESCALA o total (`score = raw_score * confidence`) — sua `contribution` é o delta `score - raw_score`, negativo quando `confidence < 1`. Testado: a soma de todas as contribuições (incluindo essa linha) é sempre igual ao `buy_score` final do item, nas três versões.
+- `engine.py::_score_breakdown()` converte `BuyScore.factors` para `list[ScoreFactor]` e popula `RecommendationItem.score_breakdown` em `recommend`/`recommend_v2`/`recommend_v3` — mesma função reaproveitada nas três, sem duplicar a conversão.
+
+### Adicionado — `block_source` estruturado (`eligibility.py`, `schemas/recommendation_result.py`)
+- Novas constantes `BLOCK_SOURCE_MANUAL` (`bloqueio_manual`), `BLOCK_SOURCE_OVER_CONCENTRATION` (`sobreconcentracao`), `BLOCK_SOURCE_DETAILED_RULE` (`regra_detalhada`) e `BLOCK_SOURCE_POLICY` (`politica_geral`) — reaproveitando o MESMO vocabulário já usado por `engines/target_allocation/precedence.py` para o limite efetivo em Configurações ([1.30.0]), em vez de inventar rótulos novos para a mesma ideia.
+- `IgnoredAsset`/`IgnoredItem` ganharam o campo `block_source`, populado nos 4 caminhos de bloqueio existentes: `filter_eligible` (bloqueio manual e sobreconcentração, usado por v1 e v3) e `filter_eligible_v3` (regra detalhada, checada primeiro, e fallback de política geral).
+
+### Adicionado — `watchlist_reason` (`engine.py`, `schemas/recommendation_result.py`)
+- `RecommendationItem.watchlist_reason`: string opcional, populada só por `recommend_v3` quando `is_new_from_watchlist=True` (candidato novo da Watchlist/Radar, Sprint 25 Parte 2.5). Explica o teto de alocação inicial reduzido (`max_new_asset_weight`) e reforça que iniciar a posição continua sendo decisão do usuário, nunca automática — mesma regra do alerta agregado já existente, agora também disponível por item.
+
+### Alterado — tela Aporte (`pages_impl/aporte.py`)
+- Nova `_score_breakdown_chart()`: gráfico de barras horizontal (Plotly) com a contribuição de cada fator, dentro de um expander "Breakdown do score — TICKER" na justificativa por ativo; contribuições negativas (linha de confiança do v3) aparecem em cor neutra.
+- Tabela "Ativos evitados" ganhou a coluna "Origem do bloqueio", traduzindo os 4 valores de `block_source` via `_BLOCK_SOURCE_LABELS` ("—" quando `None`).
+- `watchlist_reason`, quando presente, é exibido via `st.info()` na justificativa do item, antes das razões em texto livre.
+
+### Documentação
+- `docs/DECISION_ENGINE_3.md`: nova seção "Explicabilidade estruturada (pós-Sprint 25, Parte 4)" detalhando `score_breakdown` (com a semântica especial da linha de confiança do v3), os 4 valores de `block_source` e `watchlist_reason` — deixando explícito que nada aqui altera o que é recomendado, alocado ou bloqueado.
+
+### Testes
+- Suíte completa: **944 testes passando**. `ruff check` e `black --check --fast` limpos.
+
+### Deixado de fora desta rodada
+- Nenhum item pendente do backlog aprovado da Sprint 25 — os 4 itens (Ajuste Watchlist/Radar, Proventos históricos, UX Configurações/alocação, Explicabilidade Aporte v3) estão concluídos.
+
+## [1.30.0] - UX de Configurações/alocação
+
+### Contexto
+A LG INVEST sempre teve três formas independentes de configurar meta de alocação — alocação-alvo simples por classe (Sprint 17), regras detalhadas por classe/moeda/país/ativo (Sprint 24) e a Investment Policy geral (Sprint 24) — mas nunca as três tinham sido mostradas juntas numa mesma tela, com a precedência entre elas explícita para o usuário. Esta entrega reorganiza a tela Configurações em torno dessas três camadas, adiciona um motor de exibição (não decisório) para deixar visível qual camada está valendo em cada dimensão, presets de alocação com pré-visualização e confirmação, cadastro rápido para dimensões comuns e detecção de conflitos entre camadas. Nenhuma engine de decisão foi alterada — este ajuste é só de exibição/UX e uma validação nova de consistência.
+
+### Adicionado — precedência visível (`engines/target_allocation/precedence.py`)
+- Módulo puro novo: `resolve_effective_limits(rules, policy)` calcula o limite máximo efetivo por dimensão replicando a MESMA precedência já usada pelo Decision Engine 3.0 para bloquear aportes (`eligibility.py::filter_eligible_v3`): regra detalhada > política geral > nenhum limite. Só para exibição — não decide nada e não é chamada pelo Decision Engine.
+- `detect_conflicts(rules, simple_allocation)` detecta 3 tipos de inconsistência informativa entre camadas: `simple_vs_detailed` (meta simples diverge do alvo da regra detalhada para a mesma classe), `sum_not_100` (soma dos alvos das regras detalhadas por classe não fecha 100%) e `min_greater_than_target` (mínimo maior que alvo numa mesma regra). Nenhum conflito bloqueia ou corrige nada sozinho — são só avisos.
+- Fallback de política por classe limitado a `crypto` (`max_crypto_weight`) e `fii` (`target_fii_max`) — as demais classes só têm limite se houver regra detalhada própria. Para `asset`, `max_asset_weight` só cobre tickers sem regra própria (uma regra de ativo específico sempre vence).
+
+### Adicionado — `allocation_presets_service.py` (presets de alocação simples)
+- 5 modelos prontos: `conservador`, `moderado`, `crescimento_global`, `buy_and_hold_internacional` e `personalizado` (não aplica nada, sinaliza configuração manual). Cada preset com alocação é conferido em tempo de import (cobre só classes conhecidas, soma 100%).
+- Fluxo de aplicação sempre exige pré-visualização (tabela com a alocação do modelo) seguida de confirmação explícita numa etapa separada — nunca aplicado com um clique só. Depois de aplicado, cada classe continua editável livremente.
+
+### Adicionado — `allocation_overview_service.py` e schemas
+- `build_allocation_overview(db, portfolio_id)`: orquestra `precedence.py` lendo regras detalhadas, Investment Policy e alocação simples; devolve `AllocationOverview` (Pydantic). Nunca grava nada, não é usado pelo Decision Engine.
+- Novos schemas em `schemas/target_allocation.py`: `EffectiveLimitView` (com `source` e `overridden_policy_value` quando a regra detalhada sobrescreve um valor de política), `AllocationConflictView`, `AllocationOverview`.
+
+### Adicionado — validação `min_weight > target_weight`
+- `TargetAllocationRuleService.set_rule` agora também rejeita `min_weight > target_weight` ("o mínimo aceitável não pode ficar acima do alvo desejado"). Antes só `min > max` e `target > max` eram bloqueados.
+
+### Alterado — tela Configurações (`pages_impl/configuracoes.py`)
+- Nova introdução ("Como funciona a alocação-alvo") explicando as 3 camadas e a ordem de precedência antes de qualquer formulário, com o aviso fixo "não gera venda automática" (regras orientam aportes; quando uma dimensão está acima do alvo/máximo, o único efeito é pausar novos aportes ali — nunca vender).
+- Camada 1 (alocação simples): expander "Aplicar um modelo pronto (preset)" com seleção, pré-visualização em tabela e confirmação em duas etapas.
+- Camada 2 (regras detalhadas): lista agrupada por dimensão (Classe/Moeda/País/Ativo); botão "Editar" por linha que pré-preenche o formulário sem precisar remover e recriar; cadastro rápido com botões de atalho para USD, BRL, FIIs, ETFs, BTC (`asset=BTC-USD`), Tesouro (`class=bond`), VOO e QQQ — só preenchem dimensão/chave, o usuário ainda define pesos e salva manualmente.
+- Nova seção "Limite efetivo por dimensão e conflitos": tabela com o limite máximo efetivo por dimensão (origem e valor de política sobrescrito, quando aplicável) e lista de conflitos detectados entre as três camadas — puramente informativa.
+
+### Documentação
+- `docs/TARGET_ALLOCATION_ENGINE.md`: nova seção "UX de Configurações/alocação (pós-Sprint 25)" com a precedência, os presets, o overview service e a nova organização da tela.
+- `docs/INVESTMENT_POLICY.md`: nota cross-referenciando que a política agora atua como fallback visível de Target Allocation Rules na tela Configurações.
+
+### Testes
+- Suíte completa: **934 testes passando**. `ruff check` e `black --check --fast` limpos.
+
+### Deixado de fora desta rodada
+- Proventos por Ativo (Fonte B) e explicabilidade do Aporte v3 seguem para as próximas sprints, na ordem já definida pelo usuário.
+
+## [1.29.0] - Sprint 25 (Parte 3) — Diagnóstico e correção do histórico mensal de proventos
+
+### Contexto
+Bug real reportado pelo usuário: `sync_dividendos_me.py --dry-run` continuava retornando `income_monthly: monthly_income_found: 0, raw_rows_detected: 0` mesmo com dado real disponível na Fonte A (Central de Proventos → Análise). Investigação identificou que a extração dessa aba nunca recebeu o padrão retry-on-empty já aplicado à carteira principal na Sprint 23.3 — uma tabela que ainda não tinha renderizado no momento da leitura era lida como "sem dado" sem nenhuma nova tentativa. Esta entrega corrige o bug de timing, adiciona um diagnóstico honesto reforçado (nunca inventa estrutura de DOM não confirmada ao vivo) e um modo debug opcional (snapshot local de HTML sanitizado + screenshot, nunca enviado a lugar nenhum) para investigar qualquer caso residual. "Dividendos por Ativo" (Fonte B) permanece documentada como não implementada — decisão preservada desde a Sprint 24, nenhuma extração nova foi inventada sem inspeção ao vivo.
+
+### Corrigido — timing na extração do histórico mensal
+- `client.py::_extract_monthly_summary_all_wallets` agora usa `_extract_monthly_table_with_retry`: espera a `<table>` aparecer (`wait_for_selector`) e, se a primeira leitura vier vazia, espera `_RETRY_WAIT_MS` (1.8s) e tenta de novo antes de considerar a carteira sem dado — mesmo padrão já usado para Brasil/EUA desde a Sprint 23.3.
+
+### Adicionado — diagnóstico reforçado (`_diagnose_income_page`)
+- `SectionDiagnostics` ganhou 7 campos opcionais (retrocompatíveis): `final_url`, `tabs_found`, `wallet_selectors_found`, `table_elements_found`, `canvas_or_svg_detected`, `debug_snapshot_path`, `debug_screenshot_path`.
+- Coletado tanto no sucesso quanto na falha da extração mensal — nunca levanta exceção (cada checagem tem seu próprio `try/except`), nunca mascara o resultado real.
+- Só reporta presença/ausência de rótulos conhecidos e contagens genéricas de `table`/`canvas`/`svg` — nunca inventa uma estrutura de DOM não confirmada ao vivo.
+
+### Adicionado — modo debug opcional (CLI)
+- `scripts/sync_dividendos_me.py dry-run --debug-income-monthly [--debug-dir CAMINHO]`: salva localmente um snapshot de HTML sanitizado (sem `<script>`/`<style>`, truncado a 50.000 caracteres) e um screenshot da página no estado final da extração. Nunca ligado por padrão, nunca enviado a lugar nenhum, falha de salvamento nunca derruba a extração.
+- `income_service.py`: `build_monthly_preview`/`dry_run_monthly` ganharam `debug`/`debug_dir` (repassados ao client); `import_monthly_summaries` (caminho que persiste) foi deixado de fora de propósito.
+
+### Testes
+- `test_dividendos_me_client.py`: 11 testes novos — retry em `_extract_monthly_table_with_retry` (sucesso na 1ª leitura, sucesso na 2ª após retry, falha em ambas); diagnóstico honesto de abas/carteiras/tabelas/canvas encontrados ou não; diagnóstico nunca levanta exceção mesmo com `evaluate`/`get_by_text` quebrados; modo debug liga/desliga o salvamento de HTML/screenshot corretamente e nunca derruba a extração se o salvamento falhar. `_FakePage`/`_FakeLocator` estendidos com `count()`, `content()`, `screenshot()`.
+- `test_dividendos_me_income_service.py`: `_FakeMonthlyClient` atualizado para aceitar `debug`/`debug_dir`.
+- Suíte completa: **899 testes passando** (888 → 899), 0 falhas. `ruff check` e `black --check --fast` limpos.
+
+### Documentação
+- `docs/DIVIDENDOS_ME_INCOME_SOURCES.md`: nova seção "Correção de timing + diagnóstico reforçado" sob a Fonte A, com todos os novos campos de diagnóstico e o uso do modo debug.
+
+### Deixado de fora desta rodada
+- Fonte B ("Dividendos por Ativo") continua não implementada — extração real depende de inspecionar a página ao vivo (gráfico ApexCharts/Highcharts/Chart.js, não tabela HTML), o que este ambiente de desenvolvimento não permite fazer com segurança. UX de Configurações/alocação e explicabilidade do Aporte v3 seguem para as próximas sprints, na ordem aprovada pelo usuário.
+
+## [1.28.0] - Ajuste Watchlist/Radar — troca de status e validação da cadeia Radar/Aporte v3
+
+### Contexto
+Ajuste reportado pelo usuário logo após a Sprint 25: dava para cadastrar um ativo na Watchlist com um status inicial, mas não havia forma simples de promovê-lo depois (ex.: `watching` → `candidate`) sem remover e recadastrar. `WatchlistService.set_status` já suportava qualquer transição desde a Parte 2.2 — o que faltava era expor isso na tela Radar. Esta entrega corrige a UX/funcionalidade da Watchlist, valida ponta a ponta (sem mock no `RadarService`) que ativos `candidate` fluem para o Radar/Aporte v3 quando habilitado, e aplica os ajustes visuais rápidos pedidos na tela Radar. Proventos históricos, UX de Configurações e explicabilidade do Aporte v3 seguem para as próximas sprints, na ordem que o usuário definiu.
+
+### Adicionado — Troca de status livre na tela Radar
+- `pages_impl/radar.py`: seletor "Novo status" (`watching`/`candidate`/`blocked`/`discarded`/`bought`) + botão "Atualizar status", usando `WatchlistService.set_status` — nunca recria o registro, nunca duplica o ticker. Mensagem de sucesso "Status de TICKER atualizado para X." e `clear_all_caches()` chamado após qualquer mutação (status, coleta, remoção, cadastro).
+- Substituídos os botões rápidos "Bloquear"/"Descartar"/"Marcar comprado" (unidirecionais) pelo seletor único — mais limpo e cobre as transições que faltavam (`blocked`/`discarded` → `candidate`, `candidate` → `watching`, etc.). "Coletar dados" e "Remover" continuam como ações separadas.
+
+### Adicionado — `last_collected_at` na Watchlist
+- Migration `b7e4d1f8a293` (aditiva, nullable): nova coluna `watchlist_assets.last_collected_at`.
+- `WatchlistService.collect_data_for_asset` agora grava a data/hora da coleta bem-sucedida; a tabela da tela Radar exibe "Última coleta" (formato `dd/mm/aaaa hh:mm`, "—" quando nunca coletado — nunca inventado).
+
+### Ajustes visuais — Tela Radar
+- Ícones das seções corrigidos (apareciam como texto solto antes do título): 📌 Resumo da Watchlist, ➕ Cadastrar novo candidato, 📋 Ativos na Watchlist, 🎯 Radar de oportunidades.
+- Label "Pais" corrigido para "País" (formulário e tabela); demais textos da tela revisados para acentuação correta.
+- Tabela da Watchlist ganhou as colunas Score, Confiança, Classificação do Radar e Última coleta (uma leitura do `RadarService.evaluate()` já existente, sem chamada extra) — "—" quando o dado ainda não existe.
+
+### Validado — cadeia real Watchlist → Radar → Aporte v3
+- Novo `test_watchlist_status_radar_integration.py` (8 testes): diferente de `test_decision_watchlist_integration.py` (que isola a integração mockando `RadarService.evaluate`), estes testes rodam a cadeia real — só o cálculo de score é determinístico via monkeypatch em `LGScoreService`/`ConvictionScoreService`. Confirma: `candidate` com score bom vira `new_candidate` no `RadarService` real e entra em `build_inputs_v3` só com a flag ligada; `watching`/`blocked`/`discarded`/`bought` nunca entram, mesmo com o mesmo score bom; promover `watching` → `candidate` no mesmo registro (via `set_status`) libera o ativo para o Aporte v3 na mesma sessão, sem duplicar.
+- Novos testes em `test_radar_engine.py`: `watching`/`bought` com score bom nunca viram `new_candidate` (só `candidate` pode).
+- Novos testes em `test_watchlist_service.py`: as 6 transições de status pedidas explicitamente (`watching↔candidate`, `blocked→candidate`, `discarded→candidate`, `candidate→blocked`, `candidate→discarded`), todas sem duplicar o registro e sem criar `Position`/alterar patrimônio.
+
+### Testes
+- Suíte completa: **888 testes passando** (871 → 888), 0 falhas. `ruff check` e `black --check --fast` limpos. Migration `b7e4d1f8a293` validada via `upgrade head` / `downgrade -1` / `upgrade head` contra banco descartável.
+
+### Documentação
+- `docs/WATCHLIST_RADAR.md`: nova seção "Troca de status", modelo atualizado com `last_collected_at`, seção da tela Radar e "como validar localmente" atualizadas.
+
+### Deixado de fora desta rodada
+- Proventos históricos (Central de Proventos → Análise / Dividendos por Ativo), UX de Configurações/alocação e explicabilidade do Aporte v3 — próximas sprints, nessa ordem.
+
 ## [1.27.0] - Sprint 25 (Parte 1 + Parte 2) — Precedência de limites e Watchlist/Radar
 
 ### Contexto

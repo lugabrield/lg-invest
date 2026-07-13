@@ -100,7 +100,14 @@ de defaults nunca sobrescreve um valor já salvo.
 ## Onde é usado
 
 - **Configurações** (`frontend/streamlit_app/pages_impl/configuracoes.py`):
-  seção "Política de investimento" — visualiza e edita todos os campos.
+  seção "Política de investimento" (Camada 3) — visualiza e edita todos
+  os campos. Desde o ajuste UX de Configurações/alocação (pós-Sprint 25),
+  a mesma tela mostra explicitamente, na seção "Limite efetivo por
+  dimensão e conflitos", quando `max_crypto_weight` ou `target_fii_max`
+  estão valendo como FALLBACK de uma regra detalhada (Camada 2) ausente
+  — ver `docs/TARGET_ALLOCATION_ENGINE.md`, seção "UX de Configurações/
+  alocação", para a precedência completa (regra detalhada > política
+  geral > nenhum limite).
 - **Decision Engine 3.0** (Fase 4, ainda não implementada): vai consumir
   `max_asset_weight`, `max_crypto_weight`, `target_international_min/max`,
   `target_fii_max` e `rebalance_threshold` como regras de bloqueio/alerta.

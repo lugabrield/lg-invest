@@ -1,0 +1,53 @@
+{
+  "prices_at": "2026-07-11T20:48:00.039692+00:00",
+  "last_summary": {
+    "prices": {
+      "processados": 27,
+      "atualizados": 25,
+      "pulados_manual": 1,
+      "dados_insuficientes": 1,
+      "falhas": 0,
+      "fontes": [
+        "yahoo"
+      ]
+    },
+    "fundamentals": {
+      "processados": 27,
+      "atualizados": 25,
+      "dados_insuficientes": 0,
+      "nao_aplicaveis": 2,
+      "falhas": 0,
+      "fontes": [
+        "yahoo"
+      ],
+      "valuation_recalculado": 27,
+      "traps_recalculadas": 23,
+      "scores_recalculados": 27,
+      "dados_suficientes": 21,
+      "dados_parciais": 0,
+      "dados_insuficientes_cobertura": 2,
+      "campos_mais_ausentes": [
+        "ROIC",
+        "EBIT",
+        "Histórico de dividendos (Dividend Yield por período)",
+        "EV/EBITDA",
+        "EBITDA"
+      ]
+    },
+    "watchlist": {
+      "processados": 6,
+      "atualizados": 6,
+      "dados_insuficientes": 0,
+      "falhas": 0,
+      "fontes": [
+        "yahoo"
+      ],
+      "posicoes_criadas": 0,
+      "patrimonio_alterado": false
+    }
+  },
+  "fundamentals_at": "2026-07-11T20:49:16.083467+00:00",
+  "valuation_at": "2026-07-11T20:49:28.965700+00:00",
+  "trap_detection_at": "2026-07-11T20:49:28.965700+00:00",
+  "watchlist_at": "2026-07-11T20:49:28.965700+00:00"
+}

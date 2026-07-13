@@ -16,17 +16,25 @@ from backend.app.infrastructure.database.models.thesis_review import REVIEW_CLAS
 from backend.app.infrastructure.repositories.asset_repository import AssetRepository
 from backend.app.services.journal_service import JournalService
 from backend.app.services.thesis_service import ThesisService
+from frontend.streamlit_app.components.patterns import empty_state, page_header
 from frontend.streamlit_app.db import session_scope
 
 
 def render() -> None:
-    st.title("Journal")
-    st.caption("Memória é vantagem de longo prazo: registre o porquê de cada decisão.")
+    page_header(
+        "Journal",
+        "Memória é vantagem de longo prazo: registre o porquê de cada decisão.",
+        icon="📓",
+    )
 
     with session_scope() as db:
         assets = AssetRepository(db).list_all()
     if not assets:
-        st.info("Cadastre ativos antes de registrar teses.")
+        empty_state(
+            "Nenhum ativo cadastrado",
+            "Cadastre ativos antes de registrar teses e entradas de diário.",
+            icon="📓",
+        )
         return
     tickers = [a.ticker for a in assets]
 
@@ -68,7 +76,11 @@ def _render_diary(tickers: list[str]) -> None:
         entries = JournalService(db).list_all()
         asset_by_id = {a.id: a for a in AssetRepository(db).list_all()}
     if not entries:
-        st.info("Nenhuma entrada ainda.")
+        empty_state(
+            "Nenhuma entrada ainda",
+            "Use o formulário acima para registrar sua primeira entrada de diário.",
+            icon="📓",
+        )
         return
     st.dataframe(
         [
@@ -122,7 +134,11 @@ def _render_theses(tickers: list[str]) -> None:
         theses = ThesisService(db).list_theses()
         asset_by_id = {a.id: a for a in AssetRepository(db).list_all()}
     if not theses:
-        st.info("Nenhuma tese ainda.")
+        empty_state(
+            "Nenhuma tese ainda",
+            "Use o formulário acima para registrar sua primeira tese de investimento.",
+            icon="📓",
+        )
         return
     st.dataframe(
         [
@@ -151,7 +167,11 @@ def _render_reviews() -> None:
         asset_by_id = {a.id: a for a in AssetRepository(db).list_all()}
 
     if not theses:
-        st.info("Crie uma tese antes de revisar.")
+        empty_state(
+            "Nenhuma tese para revisar",
+            "Crie uma tese na aba Teses antes de registrar uma revisão.",
+            icon="📓",
+        )
         return
 
     options = {

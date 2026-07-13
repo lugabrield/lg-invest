@@ -66,6 +66,11 @@ _SNAPSHOT_FIELDS = (
     "operating_cash_flow",
     "gross_profit",
     "shares_outstanding",
+    # Sprint 26, Fase 1 (Análise Fundamentalista Avançada / Valuation
+    # Engine 2.0) — ver `etl/providers/yahoo_fundamentals_provider.py`.
+    "total_equity",
+    "roic",
+    "interest_coverage",
 )
 
 

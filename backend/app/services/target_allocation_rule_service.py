@@ -60,6 +60,12 @@ class TargetAllocationRuleService:
             raise ValueError("min_weight não pode ser maior que max_weight")
         if target_weight is not None and max_weight is not None and target_weight > max_weight:
             raise ValueError("target_weight não pode ser maior que max_weight")
+        # Ajuste UX Configurações/alocação (pós-Sprint 25): min > target também
+        # é um estado inconsistente (o "mínimo aceitável" não pode ficar acima
+        # do "alvo desejado") — faltava esta checagem, só min > max e
+        # target > max eram bloqueados antes.
+        if min_weight is not None and target_weight is not None and min_weight > target_weight:
+            raise ValueError("min_weight não pode ser maior que target_weight")
 
         rule = TargetAllocationRule(
             portfolio_id=portfolio_id,

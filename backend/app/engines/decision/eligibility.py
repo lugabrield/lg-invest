@@ -18,6 +18,12 @@ from backend.app.engines.decision.inputs import (
     PolicyLimits,
     PortfolioAggregates,
 )
+from backend.app.schemas.recommendation_result import (
+    BLOCK_SOURCE_DETAILED_RULE,
+    BLOCK_SOURCE_MANUAL,
+    BLOCK_SOURCE_OVER_CONCENTRATION,
+    BLOCK_SOURCE_POLICY,
+)
 
 # Rótulos em português para a mensagem de bloqueio por regra detalhada
 # (Sprint 25, Parte 1) — cobre as 4 dimensões do Target Allocation Rule
@@ -34,6 +40,11 @@ _DIMENSION_LABELS = {
 class IgnoredAsset:
     ticker: str
     reason: str
+    # Sprint 25, Parte 4: qual camada gerou o bloqueio — ver
+    # `BLOCK_SOURCE_*` em `schemas/recommendation_result.py`. `None` só
+    # para o caso (hoje inexistente) de um chamador externo construir
+    # `IgnoredAsset` sem essa informação.
+    block_source: str | None = None
 
 
 def filter_eligible(
@@ -47,7 +58,9 @@ def filter_eligible(
 
     for c in candidates:
         if c.ticker in blocked:
-            ignored.append(IgnoredAsset(c.ticker, "ativo bloqueado pelo usuário"))
+            ignored.append(
+                IgnoredAsset(c.ticker, "ativo bloqueado pelo usuário", BLOCK_SOURCE_MANUAL)
+            )
             continue
         if c.current_weight > config.over_concentration_limit:
             ignored.append(
@@ -55,6 +68,7 @@ def filter_eligible(
                     c.ticker,
                     f"sobreconcentrado: peso atual {c.current_weight * 100:.1f}% "
                     f"acima do limite {config.over_concentration_limit * 100:.0f}%",
+                    BLOCK_SOURCE_OVER_CONCENTRATION,
                 )
             )
             continue
@@ -116,7 +130,13 @@ def filter_eligible_v3(
             None,
         )
         if blocked_signal is not None:
-            ignored.append(IgnoredAsset(c.ticker, _detailed_rule_block_message(blocked_signal)))
+            ignored.append(
+                IgnoredAsset(
+                    c.ticker,
+                    _detailed_rule_block_message(blocked_signal),
+                    BLOCK_SOURCE_DETAILED_RULE,
+                )
+            )
             continue
 
         dimensions_with_detailed_limit = {
@@ -124,7 +144,7 @@ def filter_eligible_v3(
         }
         reason = _policy_block_reason(c, policy, aggregates, dimensions_with_detailed_limit)
         if reason is not None:
-            ignored.append(IgnoredAsset(c.ticker, reason))
+            ignored.append(IgnoredAsset(c.ticker, reason, BLOCK_SOURCE_POLICY))
             continue
 
         still_eligible.append(c)

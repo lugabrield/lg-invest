@@ -1,8 +1,8 @@
 """Testes de WatchlistAssetRepository e WatchlistService (Sprint 25, Parte 2).
 
-Cobre: cadastro, bloqueio de duplicata ativa, edição de status
-(watching/candidate/blocked/discarded/bought), remoção, e a garantia
-central da Watchlist — nunca cria `Position` nem altera o patrimônio
+Cobre: cadastro, bloqueio de duplicata ativa, edicao de status
+(watching/candidate/blocked/discarded/bought), remocao, e a garantia
+central da Watchlist - nunca cria `Position` nem altera o patrimonio
 calculado pelo Portfolio Engine, mesmo depois de marcar um ativo como
 "bought".
 """
@@ -34,7 +34,7 @@ def _create_payload(**overrides) -> WatchlistAssetCreate:
         asset_class="stock",
         country="US",
         currency="USD",
-        thesis="Qualidade + moat + exposição internacional.",
+        thesis="Qualidade + moat + exposicao internacional.",
     )
     base.update(overrides)
     return WatchlistAssetCreate(**base)
@@ -122,6 +122,48 @@ def test_set_status_rejects_invalid_status(db_session):
         service.set_status(portfolio_id, created.id, "invalid_status")
 
 
+@pytest.mark.parametrize(
+    "from_status,to_status",
+    [
+        ("watching", "candidate"),
+        ("candidate", "watching"),
+        ("blocked", "candidate"),
+        ("discarded", "candidate"),
+        ("candidate", "blocked"),
+        ("candidate", "discarded"),
+    ],
+)
+def test_set_status_covers_every_required_transition(db_session, from_status, to_status):
+    """Ajuste Watchlist/Radar: qualquer transicao de status deve funcionar
+    livremente, sem precisar remover e recadastrar o ativo - inclusive as
+    que a tela Radar nao expunha antes (ex.: blocked/discarded -> candidate)."""
+    portfolio_id = _seed_portfolio(db_session)
+    service = WatchlistService(db_session)
+    created = service.add_watchlist_asset(portfolio_id, _create_payload(status=from_status))
+    assert created.status == from_status
+
+    updated = service.set_status(portfolio_id, created.id, to_status)
+
+    assert updated.status == to_status
+    assert updated.id == created.id
+    # nunca duplica o ativo ao trocar de status
+    assert len(service.list_watchlist_assets(portfolio_id)) == 1
+
+
+def test_set_status_never_creates_position_or_changes_patrimonio(db_session):
+    """Alteracao de status (em qualquer direcao) nunca cria `Position` nem
+    muda o patrimonio calculado pelo Portfolio Engine."""
+    portfolio_id = _seed_portfolio(db_session)
+    service = WatchlistService(db_session)
+    created = service.add_watchlist_asset(portfolio_id, _create_payload(status="watching"))
+
+    for status in ("candidate", "blocked", "candidate", "discarded", "candidate", "bought"):
+        service.set_status(portfolio_id, created.id, status)
+        assert db_session.query(Position).count() == 0
+        summary = PortfolioService(db_session).get_summary(portfolio_id)
+        assert summary.total_value == Decimal("0")
+
+
 def test_block_asset_sets_blocked_status(db_session):
     portfolio_id = _seed_portfolio(db_session)
     service = WatchlistService(db_session)
@@ -167,7 +209,7 @@ def test_remove_watchlist_asset_returns_false_when_not_found(db_session):
 
 def test_watchlist_never_creates_position_or_changes_patrimonio(db_session):
     """Garantia central: cadastrar, editar, marcar 'bought' ou remover um
-    item da watchlist nunca cria uma Position nem muda o patrimônio."""
+    item da watchlist nunca cria uma Position nem muda o patrimonio."""
     portfolio_id = _seed_portfolio(db_session)
     service = WatchlistService(db_session)
 
@@ -184,7 +226,7 @@ def test_watchlist_never_creates_position_or_changes_patrimonio(db_session):
 
 
 def test_watchlist_flags_already_in_portfolio(db_session):
-    """Se o ticker já tem posição real na carteira, a view sinaliza isso —
+    """Se o ticker ja tem posicao real na carteira, a view sinaliza isso -
     mas a watchlist continua sem alterar a Position existente."""
     portfolio_id = _seed_portfolio(db_session)
     asset = Asset(

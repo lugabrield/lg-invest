@@ -100,6 +100,61 @@ def _row_value(frame, row_label: str, column) -> Decimal | None:
         return None
 
 
+# Faixa sã de alíquota efetiva de imposto — fora disso (crédito fiscal,
+# prejuízo pontual, etc.) o número não representa uma taxa "normal" o
+# suficiente para compor NOPAT com confiança, então é descartado (vira
+# None) em vez de gerar um ROIC distorcido (Sprint 26, Fase 1).
+_MIN_SANE_TAX_RATE = Decimal("0")
+_MAX_SANE_TAX_RATE = Decimal("1")
+
+
+def _effective_tax_rate(income, col) -> Decimal | None:
+    tax_provision = _row_value(income, "Tax Provision", col)
+    pretax_income = _row_value(income, "Pretax Income", col)
+    if tax_provision is None or pretax_income in (None, Decimal("0")):
+        return None
+    rate = tax_provision / pretax_income
+    if not (_MIN_SANE_TAX_RATE <= rate <= _MAX_SANE_TAX_RATE):
+        return None
+    return rate
+
+
+def _roic_and_coverage(
+    income, balance, col, ebit: Decimal | None, total_debt: Decimal | None, cash: Decimal | None
+) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+    """ROIC (NOPAT / capital investido) e cobertura de juros (EBIT /
+    despesa financeira) a partir de linhas reais dos demonstrativos —
+    nunca aproximados de um único indicador solto. Devolve
+    `(total_equity, roic, interest_coverage)`; qualquer componente
+    ausente ou fora de faixa sã faz o resultado correspondente ficar
+    `None` (Volume 18 §8: nunca inventar dado ausente)."""
+    total_equity = _row_value(balance, "Stockholders Equity", col) or _row_value(
+        balance, "Common Stock Equity", col
+    )
+
+    roic = None
+    tax_rate = _effective_tax_rate(income, col)
+    has_roic_inputs = (
+        ebit is not None
+        and tax_rate is not None
+        and total_debt is not None
+        and total_equity is not None
+        and cash is not None
+    )
+    if has_roic_inputs:
+        invested_capital = total_debt + total_equity - cash
+        if invested_capital not in (None, Decimal("0")):
+            nopat = ebit * (Decimal("1") - tax_rate)
+            roic = nopat / invested_capital
+
+    interest_coverage = None
+    interest_expense = _row_value(income, "Interest Expense", col)
+    if ebit is not None and interest_expense not in (None, Decimal("0")):
+        interest_coverage = ebit / abs(interest_expense)
+
+    return total_equity, roic, interest_coverage
+
+
 class YahooFundamentalsProvider(FundamentalsProvider):
     name = "yahoo_fundamentals"
 
@@ -129,6 +184,22 @@ class YahooFundamentalsProvider(FundamentalsProvider):
         debt_to_ebitda = None
         if total_debt is not None and ebitda not in (None, Decimal("0")):
             debt_to_ebitda = total_debt / ebitda
+
+        # Sprint 26, Fase 1: patrimônio líquido aproximado por valor
+        # patrimonial por ação x nº de ações (ambos publicados pelo
+        # yfinance) — mesma base usada pelo próprio `priceToBook`, não é
+        # um valor inventado. `roic`/`interest_coverage` NÃO são
+        # calculados aqui: exigiriam taxa efetiva de imposto e despesa
+        # financeira, que `.info` não expõe de forma confiável; ficam
+        # restritos aos snapshots históricos anuais (`get_history`),
+        # onde vêm de linhas reais dos demonstrativos.
+        book_value_per_share = _to_decimal(info.get("bookValue"))
+        shares_outstanding = _to_decimal(info.get("sharesOutstanding"))
+        total_equity = (
+            book_value_per_share * shares_outstanding
+            if book_value_per_share is not None and shares_outstanding is not None
+            else None
+        )
 
         return FundamentalData(
             ticker=ticker,
@@ -162,7 +233,8 @@ class YahooFundamentalsProvider(FundamentalsProvider):
             total_cash=total_cash,
             operating_cash_flow=_to_decimal(info.get("operatingCashflow")),
             gross_profit=_to_decimal(info.get("grossProfits")),
-            shares_outstanding=_to_decimal(info.get("sharesOutstanding")),
+            shares_outstanding=shares_outstanding,
+            total_equity=total_equity,
         )
 
     def get_history(self, ticker: str) -> list[FundamentalData]:
@@ -198,6 +270,10 @@ class YahooFundamentalsProvider(FundamentalsProvider):
             if total_debt is not None and ebitda not in (None, Decimal("0")):
                 debt_to_ebitda = total_debt / ebitda
 
+            total_equity, roic, interest_coverage = _roic_and_coverage(
+                income, balance, col, ebit, total_debt, cash
+            )
+
             results.append(
                 FundamentalData(
                     ticker=ticker,
@@ -213,6 +289,9 @@ class YahooFundamentalsProvider(FundamentalsProvider):
                     free_cash_flow=free_cash_flow,
                     net_debt=net_debt,
                     debt_to_ebitda=debt_to_ebitda,
+                    total_equity=total_equity,
+                    roic=roic,
+                    interest_coverage=interest_coverage,
                 )
             )
 

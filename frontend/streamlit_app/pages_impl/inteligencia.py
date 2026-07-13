@@ -34,6 +34,7 @@ from frontend.streamlit_app.components.badges import (
     confidence_badge_html,
 )
 from frontend.streamlit_app.components.cards import KpiCard, render_kpi_grid
+from frontend.streamlit_app.components.patterns import empty_state, page_header
 from frontend.streamlit_app.components.sections import section
 from frontend.streamlit_app.formatting import format_brl, format_pct
 from frontend.streamlit_app.styles.theme import classification_label_pt
@@ -184,16 +185,21 @@ def _why_this_asset(a: AssetIntelligence) -> None:
 
 
 def render(portfolio_id: int) -> None:
-    st.title("Inteligência")
-    st.caption(
+    page_header(
+        "Inteligência",
         "LG Conviction Score v2 por ativo e alocação-alvo por classe — a mesma base que o "
-        "Decision Engine 2.0 usa para recomendar aportes (tela Aporte)."
+        "Decision Engine 2.0 usa para recomendar aportes (tela Aporte).",
+        icon="🧠",
     )
 
     view, income_result = cached_intelligence_bundle(portfolio_id)
 
     if not view.assets:
-        st.info("Carteira vazia. Importe posições na tela Carteira.")
+        empty_state(
+            "Carteira vazia",
+            "Importe posições na tela Carteira para ver a análise de convicção por ativo.",
+            icon="🧠",
+        )
         return
 
     cards: list[KpiCard] = [

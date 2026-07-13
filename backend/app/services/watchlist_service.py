@@ -17,6 +17,7 @@ o Portfolio Engine, nunca o cálculo de patrimônio.
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -247,6 +248,9 @@ class WatchlistService:
         if confidence is None and (lg_score_value is None and conviction_value is None):
             low_confidence = True
             notes.append("Confiança não calculada por falta de dado — tratado como baixa.")
+
+        entry.last_collected_at = datetime.utcnow()
+        self.repo.update(entry)
 
         return WatchlistDataCollectionResult(
             ticker=entry.ticker,

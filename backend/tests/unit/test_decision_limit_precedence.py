@@ -119,6 +119,7 @@ def test_detailed_rule_max_takes_precedence_over_policy_message():
     assert "25.0%" in ignored[0].reason
     assert "15.0%" not in ignored[0].reason
     assert "regra detalhada" in ignored[0].reason
+    assert ignored[0].block_source == "regra_detalhada"
 
 
 # --- 2. Sem regra detalhada, cai para a política ------------------------------
@@ -135,6 +136,7 @@ def test_falls_back_to_investment_policy_without_detailed_rule():
     assert eligible == []
     assert "política geral" in ignored[0].reason
     assert "15.0%" in ignored[0].reason
+    assert ignored[0].block_source == "politica_geral"
 
 
 # --- 3. Mensagem mostra o limite/fonte corretos -------------------------------

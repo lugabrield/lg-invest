@@ -16,7 +16,7 @@ dinheiro AGORA.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from backend.app.engines.decision.inputs import DecisionInput, PolicyLimits, PortfolioAggregates
@@ -27,6 +27,18 @@ W_CONC = Decimal("0.20")
 
 
 @dataclass
+class ScoreFactorRaw:
+    """Espelho pontual de `schemas.recommendation_result.ScoreFactor`, sem
+    depender de Pydantic dentro da engine pura (Sprint 25, Parte 4) — o
+    `engine.py` converte para o schema ao montar `RecommendationItem`."""
+
+    label: str
+    weight: Decimal | None
+    value: Decimal
+    contribution: Decimal
+
+
+@dataclass
 class BuyScore:
     ticker: str
     score: Decimal  # 0..1
@@ -34,6 +46,10 @@ class BuyScore:
     gap: Decimal
     concentration_inverted: Decimal
     reasons: list[str]
+    # Sprint 25, Parte 4: mesma decomposição de `reasons`, estruturada
+    # (label/peso/valor/contribuição) para a UI poder desenhar um
+    # breakdown visual em vez de só texto corrido.
+    factors: list[ScoreFactorRaw] = field(default_factory=list)
 
 
 def _allocation_gap(data: DecisionInput) -> Decimal:
@@ -61,6 +77,12 @@ def compute_buy_score(data: DecisionInput) -> BuyScore:
         f"concentração invertida {conc_inv:.2f} (peso atual {data.current_weight * 100:.1f}%, peso 0.20)"
     )
 
+    factors = [
+        ScoreFactorRaw("LG Score", W_LG, lg_norm, W_LG * lg_norm),
+        ScoreFactorRaw("Gap de alocação", W_GAP, gap, W_GAP * gap),
+        ScoreFactorRaw("Concentração invertida", W_CONC, conc_inv, W_CONC * conc_inv),
+    ]
+
     return BuyScore(
         ticker=data.ticker,
         score=score,
@@ -68,6 +90,7 @@ def compute_buy_score(data: DecisionInput) -> BuyScore:
         gap=gap,
         concentration_inverted=conc_inv,
         reasons=reasons,
+        factors=factors,
     )
 
 
@@ -146,6 +169,19 @@ def compute_buy_score_v2(data: DecisionInput) -> BuyScore:
         f"{data.current_weight * 100:.1f}%, peso {W_CONC_V2})",
     ]
 
+    factors = [
+        ScoreFactorRaw(
+            "Qualidade (Conviction/LG Score)",
+            W_QUALITY_V2,
+            quality_norm,
+            W_QUALITY_V2 * quality_norm,
+        ),
+        ScoreFactorRaw(
+            "Bônus classe subalocada", W_CLASS_GAP_V2, class_bonus, W_CLASS_GAP_V2 * class_bonus
+        ),
+        ScoreFactorRaw("Concentração invertida", W_CONC_V2, conc_inv, W_CONC_V2 * conc_inv),
+    ]
+
     return BuyScore(
         ticker=data.ticker,
         score=score,
@@ -153,6 +189,7 @@ def compute_buy_score_v2(data: DecisionInput) -> BuyScore:
         gap=class_bonus,
         concentration_inverted=conc_inv,
         reasons=reasons,
+        factors=factors,
     )
 
 
@@ -220,23 +257,39 @@ def _fundamentals_norm_v3(data: DecisionInput) -> tuple[Decimal, list[str]]:
     ]
 
 
+# Sprint 31 (RC v1.0, Parte 2 — copywriting): rótulo em português para o
+# texto explicativo abaixo. `gap_status`/`dimension_type` continuam em
+# inglês internamente (contrato entre engines, inalterado) — só a FRASE
+# final exibida ao usuário (dentro de "Ver detalhes técnicos") deixa de
+# expor a palavra crua "underweight" e a chave técnica da dimensão
+# ("currency"). Nenhum cálculo, peso ou limiar mudou aqui.
+_DIMENSION_TYPE_LABELS_PT = {
+    "class": "classe",
+    "currency": "moeda",
+    "country": "país",
+    "asset": "ativo",
+    "international": "exposição internacional",
+}
+
+
 def _allocation_bonus_v3(data: DecisionInput) -> tuple[Decimal, str]:
     underweight_signals = [s for s in data.rule_signals if s.gap_status == "underweight"]
     if not underweight_signals:
         if data.rule_signals:
             return Decimal("0"), (
-                "sem dimensão underweight nas regras de alocação-alvo aplicáveis: "
-                "bônus de alocação = 0"
+                "nenhuma dimensão está abaixo da meta nas regras de alocação-alvo "
+                "aplicáveis: sem bônus de alocação"
             )
-        return Decimal("0"), "sem regra de alocação-alvo configurada: bônus de alocação = 0"
+        return Decimal("0"), "sem regra de alocação-alvo configurada: sem bônus de alocação"
 
     best = max(underweight_signals, key=lambda s: s.contribution_priority)
     normalized = min(
         _MAX_ALLOC_BONUS_V3,
         Decimal(best.contribution_priority) / _ALLOC_PRIORITY_SATURATION_V3,
     )
+    dimension_label = _DIMENSION_TYPE_LABELS_PT.get(best.dimension_type, best.dimension_type)
     return normalized, (
-        f"underweight na dimensão '{best.dimension_type}' (prioridade "
+        f"abaixo da meta de alocação em {dimension_label} (prioridade "
         f"{best.contribution_priority}, peso {W_ALLOC_V3})"
     )
 
@@ -300,6 +353,25 @@ def compute_buy_score_v3(
         f"score final escalado pela confiança do dado ({data.confidence:.2f}) — "
         f"{raw_score:.3f} -> {score:.3f}"
     )
+    # Sprint 26, Fase 6: avisos do Trap Detection Engine/Valuation Engine
+    # 2.0 já resolvidos pelo serviço (a penalidade de confiança já foi
+    # aplicada a `data.confidence` acima, antes de chegar aqui — isto é
+    # só o texto explicativo, nunca um novo peso no score).
+    for warning in data.fundamental_warnings:
+        reasons.append(f"Atenção (análise fundamentalista): {warning}")
+
+    # Sprint 25, Parte 4: fator de confiança não SOMA ao score bruto, ele
+    # ESCALA o total — por isso `weight=None` (não é um peso aditivo) e a
+    # "contribuição" é o delta causado pela escala (negativo quando a
+    # confiança é < 1, zero quando é 1). Soma de todas as contribuições
+    # (incluindo esta linha) = `score` final.
+    factors = [
+        ScoreFactorRaw("Fundamentos", W_FUND_V3, fundamentals_norm, W_FUND_V3 * fundamentals_norm),
+        ScoreFactorRaw("Bônus alocação-alvo", W_ALLOC_V3, alloc_bonus, W_ALLOC_V3 * alloc_bonus),
+        ScoreFactorRaw("Concentração invertida", W_CONC_V3, conc_inv, W_CONC_V3 * conc_inv),
+        ScoreFactorRaw("Bônus internacional", W_INTL_V3, intl_bonus, W_INTL_V3 * intl_bonus),
+        ScoreFactorRaw("Ajuste por confiança do dado", None, data.confidence, score - raw_score),
+    ]
 
     return BuyScore(
         ticker=data.ticker,
@@ -308,4 +380,5 @@ def compute_buy_score_v3(
         gap=alloc_bonus,
         concentration_inverted=conc_inv,
         reasons=reasons,
+        factors=factors,
     )

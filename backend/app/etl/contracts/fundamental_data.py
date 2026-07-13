@@ -53,3 +53,13 @@ class FundamentalData(BaseModel):
     operating_cash_flow: Decimal | None = None
     gross_profit: Decimal | None = None
     shares_outstanding: Decimal | None = None
+
+    # Sprint 26 — Análise Fundamentalista Avançada / Valuation Engine 2.0,
+    # Fase 1 (dados). `total_equity` é a base para `roic`; `roic` e
+    # `interest_coverage` só são calculados quando os componentes vêm de
+    # demonstrativos financeiros reais (nunca aproximados a partir de um
+    # único número solto) — ver docstring de `YahooFundamentalsProvider`
+    # para a fórmula exata e as limitações por período (latest vs. history).
+    total_equity: Decimal | None = None
+    roic: Decimal | None = None  # NOPAT / Capital investido, fração (ex.: 0.15 = 15%)
+    interest_coverage: Decimal | None = None  # EBIT / |Despesa financeira|, razão

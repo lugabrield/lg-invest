@@ -51,3 +51,24 @@ def test_formula_components():
     # score = 0.50*0.8 + 0.30*0 + 0.20*0.90 = 0.40 + 0 + 0.18 = 0.58
     s = compute_buy_score(_input(lg=80, weight="0.10"))
     assert s.score == Decimal("0.58")
+
+
+# --- score_breakdown estruturado (Sprint 25, Parte 4) -----------------------
+
+
+def test_score_breakdown_has_three_factors_with_labels():
+    s = compute_buy_score(_input())
+    labels = [f.label for f in s.factors]
+    assert labels == ["LG Score", "Gap de alocação", "Concentração invertida"]
+
+
+def test_score_breakdown_contributions_sum_to_score():
+    s = compute_buy_score(_input(lg=80, weight="0.10", target="0.25"))
+    total = sum((f.contribution for f in s.factors), start=Decimal("0"))
+    assert total == s.score
+
+
+def test_score_breakdown_weights_match_formula_weights():
+    s = compute_buy_score(_input())
+    weights = [f.weight for f in s.factors]
+    assert weights == [Decimal("0.50"), Decimal("0.30"), Decimal("0.20")]

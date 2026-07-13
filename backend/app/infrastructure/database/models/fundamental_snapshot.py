@@ -23,10 +23,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.infrastructure.database.base import Base, TimestampMixin
 
-# Origem do snapshot: "yahoo" (coleta automática), "manual" (cadastro futuro,
-# não implementado ainda) ou "unavailable" (classe sem fundamentos aplicáveis,
-# ex.: cripto/Tesouro Direto — registrado para não recoletar à toa).
-FUNDAMENTALS_SOURCES = ("yahoo", "manual", "unavailable")
+# Origem do snapshot: "yahoo" (coleta automática), "manual" (cadastro
+# manual avulso, legado), "manual_import" (importação em lote via
+# CSV/Excel — Sprint 28, Fase 5, `fundamentals_import_service.py`) ou
+# "unavailable" (classe sem fundamentos aplicáveis, ex.: cripto/Tesouro
+# Direto — registrado para não recoletar à toa).
+FUNDAMENTALS_SOURCES = ("yahoo", "manual", "manual_import", "unavailable")
 
 
 class FundamentalSnapshot(Base, TimestampMixin):
@@ -79,6 +81,15 @@ class FundamentalSnapshot(Base, TimestampMixin):
     operating_cash_flow: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
     gross_profit: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
     shares_outstanding: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+
+    # Sprint 26 — Análise Fundamentalista Avançada / Valuation Engine 2.0,
+    # Fase 1. Todos nullable pela mesma regra: ausência de dado é normal
+    # (ver `etl/providers/yahoo_fundamentals_provider.py` para a fórmula
+    # e as limitações — `roic`/`interest_coverage` só são calculados nos
+    # snapshots históricos anuais, nunca no snapshot TTM/latest).
+    total_equity: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+    roic: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    interest_coverage: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
 
     asset: Mapped[Asset] = relationship(  # noqa: F821
         "Asset", back_populates="fundamental_snapshots"

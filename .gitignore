@@ -12,6 +12,11 @@ data/exports/*
 data/backups/*
 !data/**/.gitkeep
 
+# Snapshots de debug do Dividendos.me (--debug-income-monthly / debug=True em
+# testes) — HTML/screenshot locais para diagnóstico, nunca artefato do produto.
+debug_dividendos_me/
+debug_dividendos_me_*/
+
 # Python
 __pycache__/
 *.py[cod]

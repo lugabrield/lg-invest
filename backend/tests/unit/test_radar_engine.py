@@ -87,6 +87,41 @@ def test_new_asset_middling_score_is_monitor():
     assert result.candidates[0].classification == "monitor"
 
 
+def test_watching_status_with_good_score_never_becomes_new_candidate():
+    """Ajuste Watchlist/Radar: só o status 'candidate' pode virar
+    'new_candidate' - 'watching' com o mesmo score bom continua
+    'monitor' (o usuario ainda nao promoveu o ativo)."""
+    result = evaluate_radar(
+        [
+            _candidate(
+                watchlist_status="watching",
+                lg_score=Decimal("90"),
+                conviction_score=Decimal("90"),
+                confidence=Decimal("0.95"),
+            )
+        ]
+    )
+    assert result.candidates[0].classification == "monitor"
+    assert result.candidates[0].classification != "new_candidate"
+
+
+def test_bought_status_with_good_score_never_becomes_new_candidate():
+    """'bought' tambem nao e 'candidate' - nao deve virar candidato
+    principal de aporte, mesmo com score bom (o registro na watchlist e
+    so historico depois que o usuario sinalizou a compra)."""
+    result = evaluate_radar(
+        [
+            _candidate(
+                watchlist_status="bought",
+                lg_score=Decimal("90"),
+                conviction_score=Decimal("90"),
+                confidence=Decimal("0.95"),
+            )
+        ]
+    )
+    assert result.candidates[0].classification != "new_candidate"
+
+
 def test_current_holding_good_score_is_current_holding_candidate():
     result = evaluate_radar(
         [

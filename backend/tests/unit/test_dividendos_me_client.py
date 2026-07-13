@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -32,9 +33,15 @@ from backend.app.integrations.dividendos_me.schemas import (
 
 
 class _FakeLocator:
-    def __init__(self, tracker: list[str], text: str):
+    """`present_texts=None` preserva o comportamento original (usado nos
+    testes de navegação/clique, que nunca chamam `.count()`). Quando um
+    `set` é passado, `.count()` reflete se `text` está nele — usado pelos
+    testes de `_diagnose_income_page` (ajuste pós-Sprint 25, Parte 3)."""
+
+    def __init__(self, tracker: list[str], text: str, present_texts: set[str] | None = None):
         self._tracker = tracker
         self._text = text
+        self._present_texts = present_texts
 
     @property
     def first(self):
@@ -42,6 +49,11 @@ class _FakeLocator:
 
     def click(self, timeout=None):  # noqa: ARG002
         self._tracker.append(self._text)
+
+    def count(self):
+        if self._present_texts is None:
+            return 1
+        return 1 if self._text in self._present_texts else 0
 
 
 class _FakePage:
@@ -52,7 +64,12 @@ class _FakePage:
     SEQUÊNCIA de retornos por chamada — necessário para testar o
     retry-on-empty de `_extract_table_section`/`_extract_card_section`
     (primeira leitura vazia, segunda com dados). `url` simula
-    `page.url`, lido por `_goto_section` para diagnóstico (Sprint 23.3)."""
+    `page.url`, lido por `_goto_section` para diagnóstico (Sprint 23.3).
+
+    Ajuste pós-Sprint 25, Parte 3: `texts_present` (opcional) simula quais
+    rótulos existem de fato na página (usado por `get_by_text(...).count()`
+    em `_diagnose_income_page`); `html_content`/`content()`/`screenshot()`
+    simulam o snapshot de debug — nunca tocam disco/rede de verdade."""
 
     def __init__(
         self,
@@ -62,17 +79,22 @@ class _FakePage:
         has_table=True,
         evaluate_results=None,
         url="https://app.dividendos.me/renda-variavel/brasil/tabela-ativos",
+        texts_present: set[str] | None = None,
+        html_content: str = "<html><body><table></table></body></html>",
     ):
         self._table_rows = table_rows
         self._card_rows = card_rows
         self._has_table = has_table
         self._evaluate_results = list(evaluate_results) if evaluate_results is not None else None
         self.url = url
+        self._texts_present = texts_present
+        self._html_content = html_content
         self.clicked_texts: list[str] = []
         self.clicked_hrefs: list[str] = []
+        self.screenshot_calls: list[str | None] = []
 
     def get_by_text(self, text, exact=True):  # noqa: ARG002
-        return _FakeLocator(self.clicked_texts, text)
+        return _FakeLocator(self.clicked_texts, text, present_texts=self._texts_present)
 
     def click(self, selector, timeout=None):  # noqa: ARG002
         self.clicked_hrefs.append(selector)
@@ -95,6 +117,12 @@ class _FakePage:
         if "Quantidade:" in script or "Valor atual" in script:
             return self._card_rows
         return self._table_rows
+
+    def content(self):
+        return self._html_content
+
+    def screenshot(self, path=None, **_kwargs):
+        self.screenshot_calls.append(path)
 
 
 def _spec(key: str, kind: str = "table", accordion_label: str | None = None) -> _SectionSpec:
@@ -526,3 +554,198 @@ def test_fetch_income_monthly_summaries_requires_playwright(monkeypatch):
     client = DividendosMeClient("a@b.com", "senha")
     with pytest.raises(DividendosMeScrapingError):
         client.fetch_income_monthly_summaries()
+
+
+# --- Retry na extração do histórico mensal (ajuste pós-Sprint 25, Parte 3) --
+#
+# Mesma classe de bug de timing já corrigida em `_extract_table_section`
+# (Sprint 23.3) para a carteira principal, mas nunca aplicada à extração
+# do histórico mensal (aba "Análise") — causa mais provável de
+# `raw_rows_detected: 0` reportado pelo usuário.
+
+
+def test_extract_monthly_table_with_retry_succeeds_on_second_read():
+    rows = [{"ANO": "2026", "JAN": "100,00"}]
+    page = _FakePage(evaluate_results=[[], rows], has_table=True)
+    client = DividendosMeClient("a@b.com", "senha")
+
+    result = client._extract_monthly_table_with_retry(page)
+
+    assert result == rows
+
+
+def test_extract_monthly_table_with_retry_returns_first_read_when_not_empty():
+    rows = [{"ANO": "2026", "JAN": "100,00"}]
+    page = _FakePage(evaluate_results=[rows], has_table=True)
+    client = DividendosMeClient("a@b.com", "senha")
+
+    result = client._extract_monthly_table_with_retry(page)
+
+    assert result == rows
+
+
+def test_extract_monthly_table_with_retry_returns_empty_when_both_reads_empty():
+    page = _FakePage(evaluate_results=[[], []], has_table=False)
+    client = DividendosMeClient("a@b.com", "senha")
+
+    result = client._extract_monthly_table_with_retry(page)
+
+    assert result == []
+
+
+# --- Diagnóstico reforçado do histórico mensal (ajuste pós-Sprint 25, Parte 3)
+
+
+def test_diagnose_income_page_reports_tabs_and_wallets_found():
+    page = _FakePage(
+        texts_present={"Análise", "Carteira (B3)"},
+        evaluate_results=[{"table_count": 1, "canvas_count": 0, "svg_count": 0}],
+    )
+    client = DividendosMeClient("a@b.com", "senha")
+
+    diag = client._diagnose_income_page(page)
+
+    assert diag["final_url"] == page.url
+    assert diag["tabs_found"] == ["Análise"]
+    assert diag["wallet_selectors_found"] == ["Carteira (B3)"]
+    assert diag["table_elements_found"] == 1
+    assert diag["canvas_or_svg_detected"] is False
+    assert diag["debug_snapshot_path"] is None
+    assert diag["debug_screenshot_path"] is None
+
+
+def test_diagnose_income_page_reports_nothing_found_when_page_layout_changed():
+    # Cenário central do bug reportado: `raw_rows_detected=0` porque nenhum
+    # rótulo/aba/carteira conhecido foi encontrado — nunca inventa dado.
+    page = _FakePage(
+        texts_present=set(),
+        evaluate_results=[{"table_count": 0, "canvas_count": 0, "svg_count": 0}],
+    )
+    client = DividendosMeClient("a@b.com", "senha")
+
+    diag = client._diagnose_income_page(page)
+
+    assert diag["tabs_found"] == []
+    assert diag["wallet_selectors_found"] == []
+    assert diag["table_elements_found"] == 0
+    assert diag["canvas_or_svg_detected"] is False
+
+
+def test_diagnose_income_page_detects_canvas_or_svg_instead_of_table():
+    # Indício de que o dado é renderizado como gráfico (ApexCharts/
+    # Highcharts/D3), não como tabela HTML — sinal, nunca uma extração.
+    page = _FakePage(
+        texts_present=set(),
+        evaluate_results=[{"table_count": 0, "canvas_count": 1, "svg_count": 0}],
+    )
+    client = DividendosMeClient("a@b.com", "senha")
+
+    diag = client._diagnose_income_page(page)
+
+    assert diag["table_elements_found"] == 0
+    assert diag["canvas_or_svg_detected"] is True
+
+
+def test_diagnose_income_page_never_raises_when_evaluate_fails():
+    class _BrokenEvaluatePage(_FakePage):
+        def evaluate(self, script):  # noqa: ARG002
+            raise RuntimeError("boom")
+
+    page = _BrokenEvaluatePage(texts_present=set())
+    client = DividendosMeClient("a@b.com", "senha")
+
+    diag = client._diagnose_income_page(page)
+
+    assert diag["table_elements_found"] == 0
+    assert diag["canvas_or_svg_detected"] is False
+
+
+def test_diagnose_income_page_never_raises_when_get_by_text_fails():
+    class _BrokenGetByTextPage(_FakePage):
+        def get_by_text(self, text, exact=True):  # noqa: ARG002
+            raise RuntimeError("boom")
+
+    page = _BrokenGetByTextPage(
+        evaluate_results=[{"table_count": 0, "canvas_count": 0, "svg_count": 0}]
+    )
+    client = DividendosMeClient("a@b.com", "senha")
+
+    diag = client._diagnose_income_page(page)
+
+    assert diag["tabs_found"] == []
+    assert diag["wallet_selectors_found"] == []
+
+
+# --- Modo debug: snapshot de HTML sanitizado + screenshot local -------------
+# Nunca enviados a lugar nenhum — só para o usuário inspecionar manualmente
+# por que `raw_rows_detected` ficou em 0. Nunca ligado por padrão.
+
+
+def test_diagnose_income_page_debug_mode_saves_sanitized_html_and_screenshot(tmp_path):
+    html = (
+        "<html><head><style>body{color:red}</style></head>"
+        "<body><table><tr><td>ok</td></tr></table>"
+        "<script>doEvil()</script></body></html>"
+    )
+    page = _FakePage(
+        texts_present=set(),
+        evaluate_results=[{"table_count": 1, "canvas_count": 0, "svg_count": 0}],
+        html_content=html,
+    )
+    client = DividendosMeClient("a@b.com", "senha")
+
+    diag = client._diagnose_income_page(page, debug=True, debug_dir=str(tmp_path))
+
+    assert diag["debug_snapshot_path"] is not None
+    saved_html_path = Path(diag["debug_snapshot_path"])
+    assert saved_html_path.exists()
+    saved_html = saved_html_path.read_text(encoding="utf-8")
+    assert "<script>" not in saved_html
+    assert "<style>" not in saved_html
+    assert "<table>" in saved_html
+
+    assert diag["debug_screenshot_path"] is not None
+    assert page.screenshot_calls == [diag["debug_screenshot_path"]]
+
+
+def test_diagnose_income_page_debug_mode_off_never_saves_anything(tmp_path):
+    page = _FakePage(
+        texts_present=set(),
+        evaluate_results=[{"table_count": 0, "canvas_count": 0, "svg_count": 0}],
+    )
+    client = DividendosMeClient("a@b.com", "senha")
+
+    diag = client._diagnose_income_page(page, debug=False, debug_dir=str(tmp_path))
+
+    assert diag["debug_snapshot_path"] is None
+    assert diag["debug_screenshot_path"] is None
+    assert page.screenshot_calls == []
+    assert list(Path(tmp_path).glob("*")) == []
+
+
+def test_diagnose_income_page_debug_mode_never_raises_when_screenshot_fails(tmp_path):
+    class _BrokenScreenshotPage(_FakePage):
+        def screenshot(self, path=None, **_kwargs):  # noqa: ARG002
+            raise RuntimeError("boom")
+
+    page = _BrokenScreenshotPage(
+        texts_present=set(),
+        evaluate_results=[{"table_count": 0, "canvas_count": 0, "svg_count": 0}],
+        html_content="<html><body></body></html>",
+    )
+    client = DividendosMeClient("a@b.com", "senha")
+
+    # O HTML já deve ter sido salvo com sucesso antes da falha do
+    # screenshot — uma falha nunca pode mascarar a outra nem o diagnóstico
+    # como um todo.
+    #
+    # Usa o fixture `tmp_path` do pytest (diretório isolado por teste, limpo
+    # automaticamente pelo pytest) em vez de um caminho relativo fixo
+    # (`debug_dividendos_me_test_tmp`) — o caminho fixo dependia do diretório
+    # de trabalho de onde os testes rodam e só era limpo se os asserts abaixo
+    # passassem, deixando lixo (ou um diretório já existente de uma run
+    # anterior) quando o teste falhava ou rodava em paralelo/CWD diferente.
+    diag = client._diagnose_income_page(page, debug=True, debug_dir=str(tmp_path))
+
+    assert diag["debug_snapshot_path"] is not None
+    assert diag["debug_screenshot_path"] is None

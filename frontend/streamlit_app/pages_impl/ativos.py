@@ -10,8 +10,10 @@ lote pular esse ativo.
 
 from __future__ import annotations
 
+import tempfile
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -23,20 +25,44 @@ from backend.app.infrastructure.repositories.fundamentals_repository import (
 )
 from backend.app.infrastructure.repositories.price_repository import PriceRepository
 from backend.app.schemas.fundamentals import FundamentalSnapshotResult
+from backend.app.schemas.fundamentals_import import (
+    FUNDAMENTALS_IMPORT_NUMERIC_FIELDS,
+    FUNDAMENTALS_IMPORT_REQUIRED_COLUMNS,
+)
 from backend.app.services.conviction_score_service import ConvictionScoreService
+from backend.app.services.data_coverage_service import DataCoverageService
 from backend.app.services.data_quality_service import DataQualityService
 from backend.app.services.fundamentals_analysis_service import FundamentalsAnalysisService
+from backend.app.services.fundamentals_import_service import FundamentalsImportService
+from backend.app.services.income_real_estate_service import IncomeRealEstateService
 from backend.app.services.lg_score_service import LGScoreService
+from backend.app.services.portfolio_adequacy_service import PortfolioAdequacyService
+from backend.app.services.trap_detection_service import TrapDetectionService
 from backend.app.services.valuation_service import ValuationService
+from backend.app.services.valuation_v2_service import ValuationServiceV2
 from frontend.streamlit_app.cache import clear_all_caches
 from frontend.streamlit_app.components.badges import (
+    adequacy_status_badge_html,
     classification_badge_html,
     confidence_badge_html,
     data_quality_badge_html,
+    income_real_estate_status_badge_html,
+    trap_severity_badge_html,
+    valuation_status_badge_html,
 )
+from frontend.streamlit_app.components.patterns import empty_state, page_header
 from frontend.streamlit_app.components.sections import section
 from frontend.streamlit_app.db import session_scope
 from frontend.streamlit_app.formatting import format_money, format_number, format_pct
+
+# Sprint 26, Fase 7 — classes aplicáveis a cada bloco da Análise
+# Fundamentalista, espelhando as regras já impostas pelos engines (nunca
+# decidido de novo aqui): Valuation Engine 2.0 só ações; Análise de Renda
+# Imobiliária só FII/REIT; Adequação de Carteira só ETF/cripto/Tesouro
+# (`bond`); Trap Detection Engine cobre ações + FII/REIT.
+_STOCK_CLASSES = ("stock",)
+_INCOME_REAL_ESTATE_CLASSES = ("fii", "reit")
+_NO_TRADITIONAL_VALUATION_CLASSES = ("etf", "crypto", "bond")
 
 _PILLAR_LABELS_PT = {
     "quality": "Qualidade",
@@ -129,11 +155,11 @@ def _snapshot_result(ticker: str, snapshot) -> FundamentalSnapshotResult:
     )
 
 
-def render() -> None:
-    st.title("Ativos")
-    st.caption(
-        "Cadastro mestre dos seus ativos: preço atual, status do dado, fundamentos e "
-        "LG Score, quando disponível."
+def render(portfolio_id: int) -> None:
+    page_header(
+        "Ativos",
+        "Cadastro mestre dos seus ativos: preço, status do dado, fundamentos e LG Score.",
+        icon="🗂️",
     )
 
     with session_scope() as db:
@@ -142,7 +168,12 @@ def render() -> None:
         rows = [_asset_row(a, prices.get_latest(a.id)) for a in assets]
 
     if not assets:
-        st.info("Nenhum ativo cadastrado. Rode o seed ou importe uma carteira.")
+        empty_state(
+            "Nenhum ativo cadastrado",
+            "Rode o seed ou importe uma carteira para começar a ver preços, fundamentos e "
+            "LG Score aqui.",
+            icon="🗂️",
+        )
         return
 
     with section("Ativos cadastrados", "🗂️"):
@@ -287,8 +318,11 @@ def render() -> None:
                         f"{update_ticker} atualizado: +{result.inserted} inserido(s), "
                         f"{result.updated} atualizado(s), {result.rejected} rejeitado(s)."
                     )
-            except Exception as exc:  # noqa: BLE001 - mostrar o erro ao usuário no MVP
-                st.error(f"Não foi possível atualizar: {exc}")
+            except Exception:  # noqa: BLE001 - nunca vazar detalhe de exceção não prevista
+                st.error(
+                    "Não foi possível atualizar o preço agora — sem internet ou fonte "
+                    "indisponível. Tente novamente em alguns instantes."
+                )
 
     with section(
         "Fundamentos",
@@ -321,8 +355,11 @@ def render() -> None:
                     st.error(f"Falha ao coletar {fund_ticker}: {result.error}")
                 else:
                     st.info(f"{fund_ticker} não coletado: {result.reason}.")
-            except Exception as exc:  # noqa: BLE001 - mostrar o erro ao usuário no MVP
-                st.error(f"Não foi possível coletar fundamentos: {exc}")
+            except Exception:  # noqa: BLE001 - nunca vazar detalhe de exceção não prevista
+                st.error(
+                    "Não foi possível coletar fundamentos agora — sem internet ou fonte "
+                    "indisponível. Tente novamente em alguns instantes."
+                )
 
         if col_b.button("Coletar fundamentos de todos os ativos"):
             try:
@@ -340,8 +377,11 @@ def render() -> None:
                 )
                 if batch.failed:
                     st.warning("Falhas: " + ", ".join(batch.failed))
-            except Exception as exc:  # noqa: BLE001 - mostrar o erro ao usuário no MVP
-                st.error(f"Não foi possível coletar fundamentos: {exc}")
+            except Exception:  # noqa: BLE001 - nunca vazar detalhe de exceção não prevista
+                st.error(
+                    "Não foi possível coletar fundamentos agora — sem internet ou fonte "
+                    "indisponível. Tente novamente em alguns instantes."
+                )
 
         with session_scope() as db:
             fund_asset = AssetRepository(db).get_by_ticker(fund_ticker)
@@ -497,6 +537,267 @@ def render() -> None:
                     st.caption(detalhes)
 
     with section(
+        "Análise Fundamentalista",
+        "🔬",
+        caption=(
+            "Sprint 26: Valuation Engine 2.0 (faixa de valor justo por DCF, múltiplos e "
+            "Graham — só ações), Análise de Renda Imobiliária (P/VP + DY + estabilidade — "
+            "só FIIs/REITs), Adequação à Política de Alocação (ETFs, cripto e Tesouro, que "
+            "não têm valuation tradicional) e Trap Detection Engine (armadilhas de "
+            "valuation). Nunca uma recomendação de compra/venda — sempre análise, faixa e "
+            "nível de confiança."
+        ),
+    ):
+        fa_ticker = st.selectbox("Ativo", tickers, key="fundamental_analysis_ticker")
+
+        with session_scope() as db:
+            fa_asset = AssetRepository(db).get_by_ticker(fa_ticker)
+            fa_asset_class = fa_asset.asset_class if fa_asset is not None else None
+            fa_currency = fa_asset.currency if fa_asset is not None else None
+
+            trap_result = TrapDetectionService(db).evaluate_ticker(fa_ticker)
+            coverage = DataCoverageService(db).evaluate_ticker(fa_ticker)
+
+            valuation_v2 = None
+            income_re = None
+            adequacy = None
+            if fa_asset_class in _STOCK_CLASSES:
+                valuation_v2 = ValuationServiceV2(db).evaluate_ticker(fa_ticker)
+            elif fa_asset_class in _INCOME_REAL_ESTATE_CLASSES:
+                income_re = IncomeRealEstateService(db).evaluate_ticker(fa_ticker)
+            elif fa_asset_class in _NO_TRADITIONAL_VALUATION_CLASSES:
+                adequacy = PortfolioAdequacyService(db).evaluate_ticker(fa_ticker, portfolio_id)
+
+        if fa_asset is None:
+            st.error("Ativo não encontrado.")
+        else:
+            if valuation_v2 is not None:
+                st.markdown("**Valuation Engine 2.0 (DCF + múltiplos + Graham)**")
+                st.markdown(
+                    f"{valuation_status_badge_html(valuation_v2.valuation_status)} "
+                    f"{confidence_badge_html(valuation_v2.confidence)}",
+                    unsafe_allow_html=True,
+                )
+                if valuation_v2.reason:
+                    st.caption(valuation_v2.reason)
+                else:
+                    fv = valuation_v2.fair_value_range
+                    vcol1, vcol2, vcol3 = st.columns(3)
+                    vcol1.metric(
+                        "Faixa mínima",
+                        format_money(fv.low, fa_currency) if fv.low is not None else "—",
+                    )
+                    vcol2.metric(
+                        "Faixa base",
+                        format_money(fv.base, fa_currency) if fv.base is not None else "—",
+                    )
+                    vcol3.metric(
+                        "Faixa máxima",
+                        format_money(fv.high, fa_currency) if fv.high is not None else "—",
+                    )
+                    if valuation_v2.current_price is not None:
+                        st.caption(
+                            "Preço atual: "
+                            f"{format_money(valuation_v2.current_price, fa_currency)}"
+                        )
+                    if valuation_v2.margin_of_safety is not None:
+                        margem = f"Margem de segurança: {format_pct(valuation_v2.margin_of_safety)}"
+                        if valuation_v2.required_margin_of_safety is not None:
+                            margem += (
+                                " (exigida: "
+                                f"{format_pct(valuation_v2.required_margin_of_safety)})"
+                            )
+                        st.caption(margem)
+                    if valuation_v2.implied_expectation:
+                        st.caption(
+                            "Expectativa implícita de mercado (reverse DCF): "
+                            f"{valuation_v2.implied_expectation}"
+                        )
+                    if valuation_v2.graham_sanity_check is not None:
+                        st.caption(
+                            "Graham Number (checagem de sanidade, não método primário): "
+                            f"{format_money(valuation_v2.graham_sanity_check, fa_currency)}"
+                        )
+                    elif valuation_v2.graham_reason:
+                        st.caption(f"Graham Number: {valuation_v2.graham_reason}")
+
+                    if valuation_v2.scenarios:
+                        with st.expander("Cenários individuais"):
+                            for scenario in valuation_v2.scenarios:
+                                value_str = (
+                                    format_money(scenario.fair_value, fa_currency)
+                                    if scenario.fair_value is not None
+                                    else "indisponível"
+                                )
+                                st.markdown(f"**{scenario.label}**: {value_str}")
+                                st.caption(scenario.assumptions)
+                                if scenario.reason:
+                                    st.caption(f"Motivo: {scenario.reason}")
+
+                if valuation_v2.warnings:
+                    st.warning(" · ".join(valuation_v2.warnings))
+                if valuation_v2.methodology:
+                    st.caption("Métodos usados: " + ", ".join(valuation_v2.methodology))
+
+            elif income_re is not None:
+                st.markdown("**Análise de Renda Imobiliária (P/VP + DY + estabilidade)**")
+                st.markdown(
+                    f"{income_real_estate_status_badge_html(income_re.status)} "
+                    f"{confidence_badge_html(income_re.confidence)}",
+                    unsafe_allow_html=True,
+                )
+                if income_re.reason:
+                    st.caption(income_re.reason)
+                icol1, icol2, icol3 = st.columns(3)
+                icol1.metric(
+                    "P/VP",
+                    format_number(income_re.pvp, 2) if income_re.pvp is not None else "—",
+                )
+                icol2.metric(
+                    "Dividend Yield",
+                    (
+                        format_pct(income_re.dividend_yield)
+                        if income_re.dividend_yield is not None
+                        else "—"
+                    ),
+                )
+                icol3.metric(
+                    "DY médio (histórico próprio)",
+                    (
+                        format_pct(income_re.dy_own_history_average)
+                        if income_re.dy_own_history_average is not None
+                        else "—"
+                    ),
+                )
+                estabilidade = f"Estabilidade do DY: {income_re.dy_stability}"
+                if income_re.dy_stability_reason:
+                    estabilidade += f" — {income_re.dy_stability_reason}"
+                st.caption(estabilidade)
+                if income_re.warnings:
+                    st.warning(" · ".join(income_re.warnings))
+                if income_re.methodology:
+                    st.caption("Métodos usados: " + ", ".join(income_re.methodology))
+
+            elif adequacy is not None:
+                st.markdown("**Adequação à Política de Alocação**")
+                st.info(adequacy.valuation_note)
+                st.markdown(
+                    adequacy_status_badge_html(adequacy.adequacy_status),
+                    unsafe_allow_html=True,
+                )
+                if adequacy.reason:
+                    st.caption(adequacy.reason)
+                acol1, acol2, acol3 = st.columns(3)
+                acol1.metric(
+                    "Peso atual",
+                    (
+                        format_pct(adequacy.current_weight)
+                        if adequacy.current_weight is not None
+                        else "—"
+                    ),
+                )
+                acol2.metric(
+                    "Peso-alvo",
+                    (
+                        format_pct(adequacy.target_weight)
+                        if adequacy.target_weight is not None
+                        else "—"
+                    ),
+                )
+                acol3.metric(
+                    "Gap ao alvo",
+                    (
+                        format_pct(adequacy.gap_to_target)
+                        if adequacy.gap_to_target is not None
+                        else "—"
+                    ),
+                )
+                if adequacy.class_current_weight is not None:
+                    classe_txt = (
+                        f"Peso da classe '{fa_asset_class}' na carteira: "
+                        f"{format_pct(adequacy.class_current_weight)}"
+                    )
+                    if adequacy.class_target_weight is not None:
+                        classe_txt += f" (alvo: {format_pct(adequacy.class_target_weight)})"
+                    st.caption(classe_txt)
+                if adequacy.alert_message:
+                    st.warning(adequacy.alert_message)
+                if adequacy.extreme_overweight:
+                    st.error(
+                        "Concentração extrema nesta dimensão — considere pausar novos "
+                        "aportes aqui (nunca uma sugestão de venda)."
+                    )
+                if adequacy.warnings:
+                    st.warning(" · ".join(adequacy.warnings))
+            else:
+                st.info(f"Nenhuma análise fundamentalista disponível para {fa_ticker} ainda.")
+
+            if trap_result is not None and trap_result.has_traps:
+                st.markdown("**Possíveis armadilhas de valuation detectadas**")
+                for flag in trap_result.flags:
+                    st.markdown(
+                        f"{trap_severity_badge_html(flag.severity)} **{flag.label}**",
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(flag.explanation)
+                    st.caption(f"Como interpretar: {flag.recommended_interpretation}")
+            elif trap_result is not None and trap_result.reason:
+                st.caption(trap_result.reason)
+
+            if coverage is not None:
+                st.markdown("**Dados usados e dados ausentes**")
+                st.caption(coverage.summary)
+                purpose_cols = st.columns(5)
+                purposes = (
+                    ("Quality", coverage.quality),
+                    ("Valuation", coverage.valuation),
+                    ("Trap Detection", coverage.trap_detection),
+                    ("Análise de Renda", coverage.income),
+                    ("Decision Engine", coverage.decision_engine),
+                )
+                for col, (label, purpose) in zip(purpose_cols, purposes, strict=False):
+                    if purpose.score is not None:
+                        col.metric(label, f"{float(purpose.score):.0f}%", purpose.classification)
+                    else:
+                        col.metric(label, "—", "não aplicável")
+
+                available_fields = [
+                    f for f in coverage.fields if f.available and f.value is not None
+                ]
+                missing_fields = [f for f in coverage.fields if not f.available]
+
+                with st.expander(f"Dados disponíveis ({len(available_fields)})"):
+                    if not available_fields:
+                        st.caption("Nenhum campo fundamentalista disponível ainda.")
+                    for field in available_fields:
+                        value_str = (
+                            format_number(field.value, 2)
+                            if isinstance(field.value, Decimal)
+                            else str(field.value)
+                        )
+                        meta_parts = []
+                        if field.source:
+                            meta_parts.append(f"fonte {field.source}")
+                        if field.updated_at:
+                            meta_parts.append(
+                                f"atualizado em {field.updated_at.strftime('%d/%m/%Y')}"
+                            )
+                        meta = f" — {', '.join(meta_parts)}" if meta_parts else ""
+                        st.caption(f"**{field.label}**: {value_str}{meta}")
+
+                with st.expander(
+                    f"Dados ausentes ({len(missing_fields)})", expanded=bool(missing_fields)
+                ):
+                    if not missing_fields:
+                        st.caption("Nenhum campo do relatório está ausente.")
+                    for field in missing_fields:
+                        st.caption(f"- {field.label}")
+                    if coverage.valuation.missing_labels:
+                        st.caption(
+                            "Impacto: sem esses dados, a confiança do valuation permanece baixa."
+                        )
+
+    with section(
         "Marcar ativo como manual",
         "🏷️",
         caption=(
@@ -570,3 +871,89 @@ def render() -> None:
                         st.success(
                             f"Preço atual de {manual_ticker} salvo: {manual_price} (manual)."
                         )
+
+    with section(
+        "Importar fundamentos manualmente (CSV/Excel)",
+        "📥",
+        caption=(
+            "Fallback para ativos sem cobertura no Yahoo Finance (comum em ações brasileiras "
+            "menores). Preencha o modelo com dados de outra fonte (RI da empresa, CVM, "
+            "Status Invest etc.) — o ticker já precisa estar cadastrado; nenhum ativo novo é "
+            "criado por aqui. Depois de importar, valuation, traps e scores dos ativos "
+            "afetados são recalculados automaticamente."
+        ),
+    ):
+        template_columns = list(FUNDAMENTALS_IMPORT_REQUIRED_COLUMNS) + list(
+            FUNDAMENTALS_IMPORT_NUMERIC_FIELDS
+        )
+        template_csv = ",".join(template_columns) + "\n"
+        st.download_button(
+            "Baixar modelo CSV",
+            data=template_csv,
+            file_name="modelo_fundamentos.csv",
+            mime="text/csv",
+        )
+
+        uploaded = st.file_uploader(
+            "Arquivo de fundamentos (.csv, .xlsx, .xls)",
+            type=["csv", "xlsx", "xls"],
+            key="fundamentals_import_file",
+        )
+        overwrite = st.checkbox(
+            "Sobrescrever snapshots existentes que colidirem (mesmo ticker + período)",
+            value=False,
+            key="fundamentals_import_overwrite",
+            help=(
+                "Sem marcar isso, linhas que colidem com um snapshot já salvo ficam pendentes "
+                "de confirmação e não são aplicadas — nada é sobrescrito sem essa confirmação "
+                "explícita."
+            ),
+        )
+
+        if uploaded is not None and st.button("Importar fundamentos"):
+            suffix = Path(uploaded.name).suffix or ".csv"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(uploaded.getvalue())
+                tmp_path = tmp.name
+            try:
+                with session_scope() as db:
+                    import_result = FundamentalsImportService(db).import_file(
+                        tmp_path, portfolio_id, confirm_overwrite=overwrite
+                    )
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+
+            clear_all_caches()
+            st.session_state["_last_fundamentals_import"] = import_result
+
+        last_import = st.session_state.get("_last_fundamentals_import")
+        if last_import is not None:
+            cols = st.columns(4)
+            cols[0].metric("Linhas no arquivo", last_import.total_rows)
+            cols[1].metric("Aplicadas", last_import.imported)
+            cols[2].metric("Pendentes de confirmação", last_import.conflicts_pending)
+            cols[3].metric("Erros", len(last_import.errors))
+
+            if last_import.tickers_recomputed:
+                st.caption(
+                    f"Recalculado para {len(last_import.tickers_recomputed)} ativo(s): "
+                    f"valuation {last_import.valuation_recalculated} · "
+                    f"traps {last_import.traps_recalculated} · "
+                    f"scores {last_import.scores_recalculated}. "
+                    f"Tickers: {', '.join(last_import.tickers_recomputed)}."
+                )
+
+            if last_import.has_pending_conflicts:
+                st.warning(
+                    "Existem linhas com dados já salvos para o mesmo ticker/período. Marque "
+                    "'Sobrescrever snapshots existentes' e importe de novo para aplicá-las."
+                )
+                for outcome in last_import.outcomes:
+                    if outcome.status == "conflict_pending_confirmation":
+                        st.caption(f"Linha {outcome.line}: {outcome.message}")
+
+            if last_import.has_errors:
+                with st.expander(f"Erros de linha ({len(last_import.errors)})", expanded=True):
+                    for err in last_import.errors:
+                        field_part = f" [{err.field}]" if err.field else ""
+                        st.caption(f"Linha {err.line}{field_part}: {err.message}")

@@ -18,17 +18,28 @@ import streamlit as st
 
 from backend.app.services.simulation_service import SimulationService
 from frontend.streamlit_app.charts.simulation_charts import chart_simulation_percentiles
+from frontend.streamlit_app.components.patterns import (
+    MetricCardSpec,
+    info_box,
+    metric_card_row,
+    page_header,
+)
 from frontend.streamlit_app.components.sections import section
 from frontend.streamlit_app.db import session_scope
 from frontend.streamlit_app.formatting import format_brl, format_pct
 
 
 def render(portfolio_id: int) -> None:
-    st.title("Simulação")
-    st.caption(
-        "Projeção probabilística de Monte Carlo — não é uma previsão real de mercado nem "
+    page_header(
+        "Simulação",
+        "Projeção probabilística de Monte Carlo para sua carteira.",
+        icon="🎲",
+    )
+    info_box(
+        "Isto não é uma previsão",
+        "É uma projeção probabilística — não é uma previsão real de mercado nem "
         "recomendação financeira. As premissas de retorno/volatilidade por classe são "
-        "editáveis em Configurações."
+        "editáveis em Configurações, e o resultado muda conforme essas hipóteses.",
     )
 
     col_a, col_b, col_c = st.columns(3)
@@ -60,14 +71,41 @@ def render(portfolio_id: int) -> None:
         )
 
     with section("Resultado da simulação", "🎲"):
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Valor inicial", format_brl(result.initial_value))
-        col2.metric("Total aportado (horizonte)", format_brl(result.total_contributed))
-        col3.metric("Mediana projetada", format_brl(result.median_final_value))
-        col4.metric(
-            "Probabilidade de perda",
-            format_pct(result.probability_of_loss),
-            help="Fração das simulações que terminaram abaixo do total efetivamente aportado.",
+        loss_status = (
+            "critical"
+            if result.probability_of_loss >= Decimal("0.30")
+            else "attention" if result.probability_of_loss >= Decimal("0.10") else "positive"
+        )
+        cards: list[MetricCardSpec] = [
+            {
+                "label": "Valor inicial",
+                "value": format_brl(result.initial_value),
+                "icon": "💰",
+                "status": "neutral",
+            },
+            {
+                "label": "Total aportado (horizonte)",
+                "value": format_brl(result.total_contributed),
+                "icon": "➕",
+                "status": "neutral",
+            },
+            {
+                "label": "Mediana projetada",
+                "value": format_brl(result.median_final_value),
+                "icon": "📊",
+                "status": "positive",
+            },
+            {
+                "label": "Probabilidade de perda",
+                "value": format_pct(result.probability_of_loss),
+                "icon": "⚠️",
+                "status": loss_status,
+            },
+        ]
+        metric_card_row(cards)
+        st.caption(
+            "Probabilidade de perda: fração das simulações que terminaram abaixo do total "
+            "efetivamente aportado."
         )
 
         if result.num_simulations > 0:

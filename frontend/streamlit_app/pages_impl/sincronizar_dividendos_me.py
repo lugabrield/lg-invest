@@ -46,6 +46,12 @@ from frontend.streamlit_app.components.income_preview import render_full_income_
 from frontend.streamlit_app.components.monthly_summary_preview import (
     render_full_monthly_summary_preview,
 )
+from frontend.streamlit_app.components.patterns import (
+    MetricCardSpec,
+    info_box,
+    metric_card_row,
+    page_header,
+)
 from frontend.streamlit_app.db import session_scope
 
 _PROVIDER = "dividendos_me"
@@ -77,32 +83,49 @@ def _render_status(portfolio_id: int) -> None:
     creds_ok = has_dividendos_me_credentials()
     playwright_ok = is_playwright_available()
 
-    cols = st.columns(3)
-    cols[0].metric("Credenciais configuradas", "Sim" if creds_ok else "Não")
-    cols[1].metric("Playwright disponível", "Sim" if playwright_ok else "Não")
-
     with session_scope() as db:
         latest = ExternalSyncRunRepository(db).get_latest(portfolio_id, _PROVIDER)
-    if latest is not None:
-        cols[2].metric(
-            "Última sincronização com sucesso",
-            latest.finished_at.strftime("%d/%m/%Y %H:%M") if latest.finished_at else "—",
-        )
-    else:
-        cols[2].metric("Última sincronização com sucesso", "Nunca")
+    last_sync_value = (
+        latest.finished_at.strftime("%d/%m/%Y %H:%M")
+        if latest is not None and latest.finished_at
+        else "Nunca"
+    )
+
+    cards: list[MetricCardSpec] = [
+        {
+            "label": "Credenciais configuradas",
+            "value": "Sim" if creds_ok else "Não",
+            "icon": "🔑",
+            "status": "positive" if creds_ok else "attention",
+        },
+        {
+            "label": "Playwright disponível",
+            "value": "Sim" if playwright_ok else "Não",
+            "icon": "🧩",
+            "status": "positive" if playwright_ok else "attention",
+        },
+        {
+            "label": "Última sincronização com sucesso",
+            "value": last_sync_value,
+            "icon": "🔄",
+            "status": "neutral" if latest is not None else "muted",
+        },
+    ]
+    metric_card_row(cards)
 
     if not creds_ok:
-        st.warning(
+        info_box(
+            "Credenciais não configuradas",
             "Configure `DIVIDENDOS_ME_EMAIL` e `DIVIDENDOS_ME_PASSWORD` no `.env` local "
             "(ou `[dividendos_me]` em `st.secrets` no Streamlit Cloud) para habilitar "
-            "a sincronização. A senha nunca é salva no banco nem exibida aqui."
+            "a sincronização. A senha nunca é salva no banco nem exibida aqui.",
         )
     if not playwright_ok:
-        st.warning(
-            "Playwright não está instalado neste ambiente. A sincronização com o "
-            "Dividendos.me só funciona rodando localmente — use "
+        info_box(
+            "Playwright indisponível neste ambiente",
+            "A sincronização com o Dividendos.me só funciona rodando localmente — use "
             "`python -m scripts.sync_dividendos_me --portfolio-id "
-            f"{portfolio_id} --mode dry-run` no seu computador."
+            f"{portfolio_id} --mode dry-run` no seu computador.",
         )
 
 
@@ -408,12 +431,13 @@ def _render_income_by_asset_placeholder() -> None:
 
 
 def render(portfolio_id: int) -> None:
-    st.title("Sincronizar Dividendos.me")
-    st.caption(
+    page_header(
+        "Sincronizar Dividendos.me",
         "Dividendos.me é a fonte oficial das suas posições reais. A LG INVEST continua "
         "sendo a camada de análise (LG Conviction Score, decisões, projeções) — esta tela "
-        "só traz as posições atualizadas para a carteira consolidada (portfolio_id "
-        f"{portfolio_id})."
+        "só traz as posições atualizadas para a carteira consolidada "
+        f"(portfolio_id {portfolio_id}).",
+        icon="🔄",
     )
 
     _render_status(portfolio_id)

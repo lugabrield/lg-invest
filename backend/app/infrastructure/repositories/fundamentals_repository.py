@@ -46,3 +46,29 @@ class FundamentalsRepository:
         self.db.commit()
         self.db.refresh(snapshot)
         return snapshot
+
+    def upsert_fields(
+        self, asset_id: int, period_end: date, source: str, fields: dict[str, object]
+    ) -> FundamentalSnapshot:
+        """Cria ou atualiza o snapshot de um período com os campos dados.
+
+        Usado pela importação manual de fundamentos (Sprint 28, Fase 5):
+        `fields` só contém as colunas presentes/validadas na linha do
+        arquivo — colunas ausentes no arquivo NUNCA são zeradas num
+        snapshot existente (Volume 18 §8: nunca inventar/apagar dado)."""
+        existing = self.get_by_asset_and_period(asset_id, period_end)
+        if existing is not None:
+            existing.source = source
+            for key, value in fields.items():
+                setattr(existing, key, value)
+            self.db.commit()
+            self.db.refresh(existing)
+            return existing
+
+        snapshot = FundamentalSnapshot(
+            asset_id=asset_id, period_end=period_end, source=source, **fields
+        )
+        self.db.add(snapshot)
+        self.db.commit()
+        self.db.refresh(snapshot)
+        return snapshot

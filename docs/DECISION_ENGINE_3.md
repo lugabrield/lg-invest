@@ -213,6 +213,166 @@ Ver `docs/WATCHLIST_RADAR.md` para o Radar Engine em si e
 para os testes (integração via `RadarService` mockado + teto de alocação
 puro).
 
+## Explicabilidade estruturada (pós-Sprint 25, Parte 4)
+
+Esta rodada não mexe em pontuação, elegibilidade nem precedência de
+limites — os três já documentados acima continuam exatamente como
+estavam. O que muda é só a EXPOSIÇÃO do que a engine já calculava: os
+mesmos números que hoje viram frase em `reasons`/`explanation` passam a
+sair também em campos estruturados (`Decimal`, não texto), para a UI
+desenhar tabelas/gráficos em vez de só parsear string. Nenhuma
+recomendação, nenhum bloqueio e nenhuma mensagem existente foi alterada.
+
+### `score_breakdown` (`RecommendationItem.score_breakdown`)
+
+Lista de `ScoreFactor` (`schemas/recommendation_result.py`), um item por
+fator do score de compra, cada um com `label`, `weight`, `value` e
+`contribution`. É a mesma decomposição que `scoring.py` já usava para
+montar `reasons`, só que sem estar escondida dentro de uma frase — a
+engine calcula `ScoreFactorRaw` (dataclass puro, sem Pydantic) em
+`compute_buy_score`/`compute_buy_score_v2`/`compute_buy_score_v3`, e
+`engine.py::_score_breakdown()` converte para `ScoreFactor` ao montar
+cada `RecommendationItem` (mesma função para as três versões).
+
+A soma das contribuições é sempre igual ao `buy_score` final do item
+(conferido em teste, com margem apenas de arredondamento de `Decimal`):
+
+| Versão | Fatores (label / peso) |
+|---|---|
+| v1 | LG Score (0.50) · Gap de alocação (0.30) · Concentração invertida (0.20) |
+| v2 | Qualidade — Conviction/LG Score (0.40) · Bônus classe subalocada (0.30) · Concentração invertida (0.30) |
+| v3 | Fundamentos (0.40) · Bônus alocação-alvo (0.25) · Concentração invertida (0.20) · Bônus internacional (0.15) · Ajuste por confiança do dado (peso `None`) |
+
+A linha "Ajuste por confiança do dado", exclusiva do v3, é diferente das
+demais: seu `weight` é `None` porque o fator de confiança não SOMA ao
+score bruto, ele ESCALA o total (`score = raw_score * data.confidence`).
+Por isso a `contribution` dessa linha não é `peso * valor` como nas
+outras — é o delta causado pela escala, `score - raw_score`: zero quando
+`confidence = 1` (nada muda), negativo quando `confidence < 1` (o score
+final fica menor que a soma dos quatro fatores aditivos). Somando essa
+linha às outras quatro chega-se exatamente ao `score` final escalado.
+
+`score_breakdown` vem vazio (`[]`) só se algum chamador externo montar
+`RecommendationItem` sem passar por `engine.py` — nunca um valor
+inventado para preencher a lista.
+
+### `block_source` (`IgnoredItem.block_source`)
+
+Campo novo em `IgnoredItem`/`IgnoredAsset` (`eligibility.py`) que
+identifica qual camada gerou o bloqueio, usando as MESMAS constantes de
+string já adotadas por `engines/target_allocation/precedence.py` para o
+limite efetivo mostrado em Configurações — vocabulário único em vez de
+duas formas diferentes de dizer a mesma coisa em telas distintas
+(`schemas/recommendation_result.py::BLOCK_SOURCES`):
+
+| Valor | Camada | Onde é populado |
+|---|---|---|
+| `bloqueio_manual` | Ativo bloqueado manualmente pelo usuário | `filter_eligible` (v1 e v3) |
+| `sobreconcentracao` | Peso atual acima de `over_concentration_limit` | `filter_eligible` (v1 e v3) |
+| `regra_detalhada` | Sinal `gap_status == "blocked"` do Target Allocation Rule Engine v2 | `filter_eligible_v3`, checado PRIMEIRO |
+| `politica_geral` | Fallback via Investment Policy (`max_asset_weight`/`max_crypto_weight`/`target_fii_max`), só quando não há regra detalhada com `max_weight` para a mesma dimensão | `filter_eligible_v3` |
+
+`block_source` fica `None` só para compatibilidade com algum chamador
+antigo hipotético que ainda não populasse essa informação — hoje todos
+os quatro caminhos de bloqueio (v1 e v3) já preenchem o campo.
+
+### `watchlist_reason` (`RecommendationItem.watchlist_reason`)
+
+String opcional, populada apenas por `recommend_v3` e só quando
+`is_new_from_watchlist=True` (candidato novo vindo da Watchlist/Radar,
+Sprint 25 Parte 2.5 — nunca para itens que já são posição existente).
+Explica em linguagem natural por que o teto de alocação inicial desse
+item é reduzido (`DecisionConfig.max_new_asset_weight`, mesmo teto já
+aplicado em `select_and_distribute`) e reforça que iniciar a posição
+continua sendo decisão do usuário — a engine nunca inicia posição
+sozinha, só sinaliza que o candidato entrou nesta recomendação. Mesma
+regra já existia no alerta agregado da Sprint 25 Parte 2.5; aqui ela só
+passa a existir também por item, para exibição junto da justificativa
+individual do ativo.
+
+### Exposição na UI (`pages_impl/aporte.py`)
+
+- `_score_breakdown_chart()`: gráfico de barras horizontal (Plotly) com a
+  contribuição de cada fator, dentro de um expander "Breakdown do score —
+  TICKER" na justificativa por ativo. Contribuições negativas (linha de
+  confiança do v3 abaixo de 100%) aparecem em cor neutra em vez da cor
+  primária.
+- Tabela "Ativos evitados" ganhou a coluna "Origem do bloqueio",
+  traduzindo os 4 valores de `block_source` via `_BLOCK_SOURCE_LABELS`
+  ("Bloqueio manual", "Sobreconcentração", "Regra detalhada (alocação-
+  alvo)", "Política geral de investimento"; "—" quando `None`).
+- `watchlist_reason`, quando presente, aparece via `st.info()` no topo da
+  justificativa do item, antes das razões em texto livre.
+
+Nada disso altera o que é recomendado, alocado ou bloqueado — é só mais
+detalhe visível sobre uma decisão que a engine já tomava antes.
+
+## Sprint 26, Fase 6 — integração com Valuation Engine 2.0 e Trap Detection Engine
+
+A Análise Fundamentalista Avançada (Sprint 26 — ver
+`docs/VALUATION_ENGINE_2.md`, `docs/TRAP_DETECTION_ENGINE.md`,
+`docs/INCOME_REAL_ESTATE_ANALYSIS.md`, `docs/PORTFOLIO_ADEQUACY_ENGINE.md`)
+foi integrada ao `recommend_v3()` sem alterar `scoring.py` matematicamente —
+decisão deliberada, motivada por uma descoberta feita durante o
+levantamento desta fase: `DecisionInput.conviction.valuation` (já um
+input existente) vem do Valuation Engine **v1** (bandas fixas), nunca
+foi trocado pelo v2. Reescrever a fórmula do zero teria maior risco de
+regressão do que reaproveitar o mecanismo já existente de "confiança
+baixa reduz score".
+
+### Como funciona
+
+`DecisionService._fundamental_signals_for_ticker(ticker, asset_class)`
+(chamado de dentro de `_decision_input_for_ticker`, antes de montar o
+`DecisionInput`):
+
+1. Consulta `TrapDetectionService.evaluate_ticker(ticker)` — sempre,
+   independente da classe (o próprio serviço já trata classes fora de
+   escopo devolvendo penalidade zero e nenhum flag, então esta função
+   não duplica essa lista de classes aplicáveis).
+2. Se `asset_class == "stock"`, consulta também
+   `ValuationServiceV2.evaluate_ticker(ticker)` — nunca para FII/REIT/
+   ETF/cripto/Tesouro (Valuation Engine 2.0 é exclusivo de ações).
+3. Devolve `(confidence_penalty, fundamental_warnings)`.
+
+Em `_decision_input_for_ticker`:
+
+```python
+confidence_penalty, fundamental_warnings = self._fundamental_signals_for_ticker(
+    ticker, asset_class
+)
+effective_confidence = max(Decimal("0"), score.confidence - confidence_penalty)
+```
+
+`effective_confidence` substitui `score.confidence` no `DecisionInput`
+final — a penalidade do Trap Detection Engine é subtraída **na
+origem**, antes de chegar em `scoring.py`. Isso significa que ela se
+propaga automaticamente por TODO o mecanismo já existente de "confiança
+baixa reduz score" (o fator de confiança escalar do v3 descrito acima),
+pelo texto de "baixa confiança" já exibido, e pela confiança média da
+`RecommendationResult` — sem precisar de um peso novo na fórmula, sem
+duplicar lógica.
+
+### `fundamental_warnings` (`DecisionInput`, novo campo)
+
+`tuple[str, ...]`, populado com: um texto por flag ativo do Trap
+Detection Engine (`f"{flag.label} (severidade {flag.severity})"`), mais
+— só para ações — um aviso quando `ValuationServiceV2` classifica o
+ativo como `"sobrevalorizado"`. Nunca calculado dentro da engine pura;
+sempre resolvido pelo serviço e só repassado. `scoring.py` anexa cada
+item de `fundamental_warnings` a `reasons` prefixado com "Atenção
+(análise fundamentalista): " — texto explicativo puro, nunca um novo
+fator de score.
+
+### Garantias mantidas
+
+- Nunca bloqueia um candidato nem o remove da lista de elegíveis — só
+  reduz a confiança efetiva (que já podia zerar a contribuição de um
+  candidato mesmo antes desta fase, via o fator de confiança existente).
+- Nunca menciona venda — testado explicitamente
+  (`test_recommend_v3_never_mentions_selling_even_with_trap_warnings`).
+- `effective_confidence` nunca fica negativa (`max(Decimal("0"), ...)`).
+
 ## O que ainda não existe
 
 Nenhuma tela mostra a evolução de `recommend_v3()` ao longo do tempo

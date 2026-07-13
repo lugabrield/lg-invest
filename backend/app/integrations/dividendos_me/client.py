@@ -44,9 +44,11 @@ deixa o diagnóstico explícito o bastante para a próxima investigação.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 from backend.app.core.logging import get_logger
 from backend.app.integrations.dividendos_me.auth import is_playwright_available, login
@@ -89,7 +91,35 @@ INCOME_HUB_HREF = "/dividends"
 # clique de verdade (Playwright `page.click`/`get_by_text().click()`,
 # que dispara eventos confiáveis no nível do SO via CDP) funciona.
 _INCOME_TAB_ANALISE = "Análise"
+_INCOME_TAB_UPCOMING = "Próximos Dividendos"
 _INCOME_WALLET_LABELS = ("Carteira (B3)", "Carteira Dolar")
+
+# Diagnóstico reforçado (ajuste pós-Sprint 25, Parte 3): rótulos conhecidos
+# checados por presença na página, nunca inventados a partir de uma
+# estrutura de DOM que não foi confirmada ao vivo — só reporta se um texto
+# exato foi encontrado ou não.
+_INCOME_KNOWN_TABS = (_INCOME_TAB_ANALISE, _INCOME_TAB_UPCOMING)
+
+# Diretório padrão para snapshots de debug — só usado quando o modo debug
+# é pedido explicitamente (CLI), nunca por padrão. Sempre local; nunca
+# enviado a lugar nenhum por este módulo.
+DEFAULT_DEBUG_DIR = "debug_dividendos_me"
+
+_DIAGNOSE_PAGE_JS = """
+() => {
+  return {
+    table_count: document.querySelectorAll('table').length,
+    canvas_count: document.querySelectorAll('canvas').length,
+    svg_count: document.querySelectorAll('svg').length,
+  };
+}
+"""
+
+# Remove <script>/<style> inteiros antes de salvar um snapshot de debug —
+# o conteúdo desses blocos nunca é útil para diagnosticar layout e pode
+# conter tokens/URLs incidentais que não precisam ir para um arquivo local.
+_SCRIPT_OR_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+_DEBUG_HTML_MAX_CHARS = 50_000
 
 
 @dataclass(frozen=True)
@@ -518,12 +548,23 @@ class DividendosMeClient:
 
     def fetch_income_monthly_summaries(
         self,
+        *,
+        debug: bool = False,
+        debug_dir: str | None = None,
     ) -> tuple[list[NormalizedMonthlySummary], list[str], list[SectionDiagnostics]]:
         """Faz login (sessão própria) e extrai o HISTÓRICO MENSAL agregado
         (aba "Central de Proventos" -> "Análise", tabela ano x mês, uma
         por carteira BR/Dólar). Sprint 23.3: separado de
         `fetch_income_events()` (calendário futuro) — nunca mistura os
         dois na mesma tabela/dedup.
+
+        `debug=True` (ajuste pós-Sprint 25, Parte 3): além do diagnóstico
+        padrão, salva localmente um snapshot de HTML sanitizado (sem
+        `<script>`/`<style>`, truncado) e um screenshot da página no
+        estado final da extração — nunca enviados a lugar nenhum, só para
+        o usuário inspecionar manualmente por que `raw_rows_detected`
+        ficou em 0. `debug_dir` (default `DEFAULT_DEBUG_DIR`) é sempre um
+        caminho local.
 
         Devolve `(resumos, seções_que_falharam, diagnóstico)` com
         `"income_monthly"` como única chave de seção possível.
@@ -543,10 +584,11 @@ class DividendosMeClient:
                 self._goto_income_hub(page)
 
                 try:
-                    monthly_summaries, wallets_found = self._extract_monthly_summary_all_wallets(
-                        page
+                    monthly_summaries, wallets_found, tabs_clicked = (
+                        self._extract_monthly_summary_all_wallets(page)
                     )
                     summaries.extend(monthly_summaries)
+                    diag_extra = self._diagnose_income_page(page, debug=debug, debug_dir=debug_dir)
                     # "Raw" aqui é quantas linhas-ano foram encontradas (uma
                     # tabela sem nenhuma linha indicaria falha de seletor);
                     # meses com R$ 0,00 não são "rejeitados", só não geram
@@ -559,6 +601,11 @@ class DividendosMeClient:
                             valid_rows=len(monthly_summaries),
                             rejected_rows=0,
                             rejection_reasons=[],
+                            navigation_detail=(
+                                "carteiras clicadas com sucesso: "
+                                + (", ".join(tabs_clicked) if tabs_clicked else "nenhuma")
+                            ),
+                            **diag_extra,
                         )
                     )
                 except Exception:  # noqa: BLE001 - proventos nunca derruba a carteira
@@ -566,10 +613,101 @@ class DividendosMeClient:
                         "Falha ao extrair o histórico mensal de proventos (detalhe suprimido)."
                     )
                     failed_sections.append("income_monthly")
+                    # Mesmo com falha, tenta coletar o diagnóstico reforçado
+                    # no estado em que a página ficou — é exatamente o
+                    # cenário que mais precisa de diagnóstico (raw_rows=0).
+                    try:
+                        diag_extra = self._diagnose_income_page(
+                            page, debug=debug, debug_dir=debug_dir
+                        )
+                        diagnostics.append(
+                            SectionDiagnostics(
+                                section="income_monthly",
+                                selector_used="table (thead/tbody), aba Análise por carteira",
+                                raw_rows_detected=0,
+                                valid_rows=0,
+                                rejected_rows=0,
+                                rejection_reasons=[],
+                                navigation_detail="extração levantou exceção antes de concluir",
+                                **diag_extra,
+                            )
+                        )
+                    except (
+                        Exception
+                    ):  # noqa: BLE001 - diagnóstico nunca pode mascarar o erro original
+                        pass
             finally:
                 browser.close()
 
         return summaries, failed_sections, diagnostics
+
+    def _diagnose_income_page(
+        self, page, *, debug: bool = False, debug_dir: str | None = None
+    ) -> dict:
+        """Coleta sinais honestos sobre o estado atual da página — nunca
+        inventa uma estrutura de DOM que não foi confirmada ao vivo, só
+        reporta presença/ausência de rótulos conhecidos e contagens
+        genéricas (`table`/`canvas`/`svg`). Nunca levanta exceção: um
+        diagnóstico que falha não pode mascarar o erro/resultado original."""
+        result: dict = {
+            "final_url": None,
+            "tabs_found": [],
+            "wallet_selectors_found": [],
+            "table_elements_found": 0,
+            "canvas_or_svg_detected": False,
+            "debug_snapshot_path": None,
+            "debug_screenshot_path": None,
+        }
+        try:
+            result["final_url"] = page.url
+        except Exception:  # noqa: BLE001
+            pass
+
+        for label in _INCOME_KNOWN_TABS:
+            try:
+                if page.get_by_text(label, exact=True).count() > 0:
+                    result["tabs_found"].append(label)
+            except Exception:  # noqa: BLE001
+                pass
+
+        for label in _INCOME_WALLET_LABELS:
+            try:
+                if page.get_by_text(label, exact=True).count() > 0:
+                    result["wallet_selectors_found"].append(label)
+            except Exception:  # noqa: BLE001
+                pass
+
+        try:
+            counts = page.evaluate(_DIAGNOSE_PAGE_JS) or {}
+            result["table_elements_found"] = counts.get("table_count", 0)
+            result["canvas_or_svg_detected"] = bool(
+                counts.get("canvas_count", 0) or counts.get("svg_count", 0)
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        if debug:
+            target_dir = Path(debug_dir or DEFAULT_DEBUG_DIR)
+            try:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+                html = page.content()
+                sanitized_html = _SCRIPT_OR_STYLE_RE.sub("", html)[:_DEBUG_HTML_MAX_CHARS]
+                html_path = target_dir / f"income_monthly_{stamp}.html"
+                html_path.write_text(sanitized_html, encoding="utf-8")
+                result["debug_snapshot_path"] = str(html_path)
+            except Exception:  # noqa: BLE001 - debug nunca pode derrubar a extração
+                pass
+
+            try:
+                screenshot_path = target_dir / f"income_monthly_{stamp}.png"
+                page.screenshot(path=str(screenshot_path))
+                result["debug_screenshot_path"] = str(screenshot_path)
+            except Exception:  # noqa: BLE001
+                pass
+
+        return result
 
     def _goto_income_hub(self, page) -> None:
         """Navega até "Central de Proventos" via clique real (client-side),
@@ -591,20 +729,47 @@ class DividendosMeClient:
 
     def _extract_monthly_summary_all_wallets(
         self, page
-    ) -> tuple[list[NormalizedMonthlySummary], int]:
+    ) -> tuple[list[NormalizedMonthlySummary], int, list[str]]:
+        """Clica na aba "Análise" e, para cada carteira conhecida, tenta
+        ler a tabela ano x mês. Correção (ajuste pós-Sprint 25, Parte 3):
+        antes só havia UMA leitura por carteira, sem espera nem nova
+        tentativa — mesma classe de bug de timing já corrigida em
+        `_extract_table_section` (Sprint 23.3) para a carteira principal,
+        mas nunca aplicada aqui. Agora espera a tabela aparecer e tenta de
+        novo (uma vez, com espera extra) se a primeira leitura vier vazia,
+        antes de considerar a carteira sem dado."""
         self._click_real(page, _INCOME_TAB_ANALISE)
 
         summaries: list[NormalizedMonthlySummary] = []
         year_rows_found = 0
+        wallets_clicked: list[str] = []
         for wallet_label in _INCOME_WALLET_LABELS:
             try:
                 self._click_real(page, wallet_label)
             except Exception:  # noqa: BLE001 - carteira pode não existir p/ este usuário
                 continue
-            raw_rows = page.evaluate(_EXTRACT_MONTHLY_TABLE_JS) or []
+            wallets_clicked.append(wallet_label)
+
+            raw_rows = self._extract_monthly_table_with_retry(page)
             year_rows_found += len(raw_rows)
             summaries.extend(parse_monthly_summary(raw_rows, wallet=wallet_label))
-        return summaries, year_rows_found
+        return summaries, year_rows_found, wallets_clicked
+
+    def _extract_monthly_table_with_retry(self, page) -> list[dict]:
+        try:
+            if page.query_selector("table") is not None:
+                page.wait_for_selector("table", timeout=DEFAULT_TIMEOUT_MS)
+        except Exception:  # noqa: BLE001 - segue para a leitura mesmo se a espera falhar
+            pass
+        raw = page.evaluate(_EXTRACT_MONTHLY_TABLE_JS) or []
+        if raw:
+            return raw
+
+        # Primeira leitura vazia sem erro — mesma hipótese de timing já
+        # tratada para a carteira principal (Sprint 23.3): dá mais tempo e
+        # tenta de novo antes de considerar a carteira sem dado.
+        page.wait_for_timeout(_RETRY_WAIT_MS)
+        return page.evaluate(_EXTRACT_MONTHLY_TABLE_JS) or []
 
     def _extract_upcoming_dividends(
         self, page, current_year: int
@@ -612,7 +777,7 @@ class DividendosMeClient:
         # "Próximos Dividendos" é a aba padrão do hub — voltar a ela
         # explicitamente em vez de assumir estado, já que a extração do
         # agregado mensal (se rodou antes) troca de aba.
-        self._click_real(page, "Próximos Dividendos")
+        self._click_real(page, _INCOME_TAB_UPCOMING)
         raw_groups = page.evaluate(_EXTRACT_UPCOMING_DIVIDENDS_JS) or []
         raw_rows_count = sum(len(g.get("rows", [])) for g in raw_groups)
         events = parse_upcoming_dividends(raw_groups, start_year=current_year)

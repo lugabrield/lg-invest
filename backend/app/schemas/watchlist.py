@@ -8,6 +8,7 @@ totalmente separado).
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
@@ -145,6 +146,9 @@ class WatchlistAssetView(BaseModel):
     # True quando o ticker já existe em `assets`/carteira — sinalizado pelo
     # serviço, nunca calculado dentro do próprio schema (schema não acessa banco).
     already_in_portfolio: bool = False
+    # Quando a última coleta de dados rodou com sucesso — `None` até a
+    # primeira coleta (ver `WatchlistService.collect_data_for_asset`).
+    last_collected_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

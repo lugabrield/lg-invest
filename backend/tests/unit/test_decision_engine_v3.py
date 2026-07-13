@@ -107,7 +107,10 @@ def test_allocation_bonus_picks_best_underweight_among_multiple_dimensions():
         )
     )
     score = compute_buy_score_v3(candidate)
-    assert any("currency" in r for r in score.reasons)
+    # A prioridade mais alta é a de "currency" (18 > 5) — a razão em texto
+    # (Sprint 31, RC v1.0, Parte 2) traduz a dimensão para português
+    # ("moeda"), nunca a chave técnica crua.
+    assert any("moeda" in r for r in score.reasons)
 
 
 # --- bônus de internacionalização -------------------------------------------
@@ -173,6 +176,7 @@ def test_filter_v3_blocks_asset_above_max_asset_weight():
     assert eligible == []
     assert "peso máximo por ativo" in ignored[0].reason
     assert "venda" not in ignored[0].reason or "não é recomendação" in ignored[0].reason
+    assert ignored[0].block_source == "politica_geral"
 
 
 def test_filter_v3_blocks_crypto_class_over_policy_limit():
@@ -184,6 +188,7 @@ def test_filter_v3_blocks_crypto_class_over_policy_limit():
     )
     assert eligible == []
     assert "crypto" in ignored[0].reason
+    assert ignored[0].block_source == "politica_geral"
 
 
 def test_filter_v3_blocks_fii_class_over_policy_limit():
@@ -225,6 +230,7 @@ def test_filter_v3_blocks_via_rule_signal_blocked_status():
     assert "regra detalhada" in ignored[0].reason
     assert "34.4%" in ignored[0].reason
     assert "25.0%" in ignored[0].reason
+    assert ignored[0].block_source == "regra_detalhada"
 
 
 def test_filter_v3_still_applies_v1_blocking_rules():
@@ -234,6 +240,7 @@ def test_filter_v3_still_applies_v1_blocking_rules():
     )
     assert eligible == []
     assert "sobreconcentrado" in ignored[0].reason
+    assert ignored[0].block_source == "sobreconcentracao"
 
 
 # --- regra de ouro: nunca recomendar venda -----------------------------------
@@ -265,3 +272,57 @@ def test_recommend_v3_end_to_end_never_suggests_sell():
     for ignored in result.ignored:
         all_text += " " + ignored.reason
     assert "vender" not in all_text.lower()
+
+
+# --- score_breakdown estruturado (Sprint 25, Parte 4) ------------------------
+
+
+def test_v3_score_breakdown_has_five_factors_including_confidence_row():
+    candidate = _candidate(is_international=True)
+    policy = PolicyLimits(target_international_min=Decimal("0.30"))
+    aggregates = PortfolioAggregates(international_weight=Decimal("0.05"))
+    score = compute_buy_score_v3(candidate, policy=policy, aggregates=aggregates)
+    labels = [f.label for f in score.factors]
+    assert labels == [
+        "Fundamentos",
+        "Bônus alocação-alvo",
+        "Concentração invertida",
+        "Bônus internacional",
+        "Ajuste por confiança do dado",
+    ]
+    assert score.factors[-1].weight is None  # escala, não é peso aditivo
+
+
+def test_v3_score_breakdown_contributions_sum_to_final_score():
+    candidate = _candidate(confidence=Decimal("0.6"), is_international=True)
+    policy = PolicyLimits(target_international_min=Decimal("0.30"))
+    aggregates = PortfolioAggregates(international_weight=Decimal("0.05"))
+    score = compute_buy_score_v3(candidate, policy=policy, aggregates=aggregates)
+    total = sum((f.contribution for f in score.factors), start=Decimal("0"))
+    assert total == score.score
+
+
+def test_v3_confidence_row_contribution_is_negative_below_full_confidence():
+    candidate = _candidate(confidence=Decimal("0.5"))
+    score = compute_buy_score_v3(candidate)
+    assert score.factors[-1].contribution < Decimal("0")
+
+
+def test_v3_confidence_row_contribution_is_zero_at_full_confidence():
+    candidate = _candidate(confidence=Decimal("1"))
+    score = compute_buy_score_v3(candidate)
+    assert score.factors[-1].contribution == Decimal("0")
+
+
+# --- watchlist_reason (Sprint 25, Parte 4) ------------------------------------
+
+
+def test_recommend_v3_sets_watchlist_reason_only_for_new_candidates():
+    held = _candidate(ticker="HELD3.SA", is_new_from_watchlist=False)
+    new = _candidate(ticker="NEW3.SA", current_weight=Decimal("0"), is_new_from_watchlist=True)
+    result = recommend_v3([held, new], Decimal("1000"))
+    by_ticker = {i.ticker: i for i in result.items}
+    assert by_ticker["HELD3.SA"].watchlist_reason is None
+    assert by_ticker["NEW3.SA"].watchlist_reason is not None
+    assert "Watchlist/Radar" in by_ticker["NEW3.SA"].watchlist_reason
+    assert "vender" not in by_ticker["NEW3.SA"].watchlist_reason.lower()

@@ -145,6 +145,35 @@ class SectionDiagnostics(BaseModel):
     para diagnosticar seções que "navegam sem erro" mas voltam vazias
     (ver `client.py::_goto_section`) — nunca inclui HTML bruto."""
 
+    # Diagnóstico reforçado do histórico mensal de proventos (ajuste
+    # pós-Sprint 25, Parte 3): sinais binários/contagens sobre o estado
+    # final da página — nunca HTML bruto, nunca dado sensível. Vazio
+    # (`[]`/`0`/`False`/`None`) para seções que não chamam
+    # `_diagnose_income_page` (ex.: carteira, calendário futuro).
+    final_url: str | None = None
+    """URL da página no momento em que o diagnóstico foi coletado — não é
+    sensível (é a mesma URL que aparece na barra de endereço do usuário)."""
+    tabs_found: list[str] = []
+    """Quais rótulos de aba conhecidos ("Análise", "Próximos Dividendos")
+    foram de fato encontrados na página no momento da coleta."""
+    wallet_selectors_found: list[str] = []
+    """Quais rótulos de carteira conhecidos ("Carteira (B3)", "Carteira
+    Dolar") foram de fato encontrados na página no momento da coleta."""
+    table_elements_found: int = 0
+    """Quantidade de elementos `<table>` presentes no DOM no momento da
+    coleta — 0 é um sinal forte de que o conteúdo não é uma tabela HTML
+    (ex.: pode estar em canvas/svg, ver `canvas_or_svg_detected`)."""
+    canvas_or_svg_detected: bool = False
+    """True quando o DOM tem pelo menos um `<canvas>`/`<svg>` — indício de
+    que o dado é renderizado como gráfico (ApexCharts/Highcharts/D3), não
+    como tabela, e não pode ser extraído pelo seletor de tabela atual."""
+    debug_snapshot_path: str | None = None
+    """Caminho local do HTML sanitizado salvo em modo debug (nunca
+    enviado a lugar nenhum) — `None` quando o modo debug não foi pedido."""
+    debug_screenshot_path: str | None = None
+    """Caminho local do screenshot salvo em modo debug — `None` quando o
+    modo debug não foi pedido."""
+
 
 class SyncPreview(BaseModel):
     """Preview de uma sincronização — nunca grava nada no banco."""

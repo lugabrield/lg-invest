@@ -68,6 +68,19 @@ class DecisionInput:
     # decidir elegibilidade ou pontuação (o score já reflete o Radar).
     is_new_from_watchlist: bool = False
 
+    # --- Sprint 26, Fase 6 (integração Valuation Engine 2.0 + Trap
+    # Detection Engine ao Decision Engine 3.0) -----------------------------
+    # Avisos textuais curtos já resolvidos pelo serviço (nunca calculados
+    # aqui) a partir dos flags do Trap Detection Engine e do status do
+    # Valuation Engine 2.0 — só para explicabilidade (`reasons`), nunca
+    # para bloquear ou pontuar diretamente. O EFEITO desses sinais no
+    # score já acontece antes: o serviço SUBTRAI a penalidade de
+    # confiança do Trap Detection Engine de `confidence` acima, então o
+    # mecanismo existente de "confiança baixa reduz score" (fator de
+    # confiança do v3) já propaga o impacto sem precisar de um peso novo
+    # na fórmula.
+    fundamental_warnings: tuple[str, ...] = ()
+
 
 @dataclass(frozen=True)
 class AllocationRuleSignal:

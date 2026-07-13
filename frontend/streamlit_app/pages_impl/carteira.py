@@ -9,6 +9,7 @@ preço — os mesmos dados do Dashboard, reaproveitados via o componente
 from __future__ import annotations
 
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 
 import streamlit as st
@@ -19,13 +20,19 @@ from backend.app.services import fx_settings_service
 from backend.app.services.dashboard_view_service import GROUP_ORDER, build_dashboard_view
 from backend.app.services.portfolio_import_service import PortfolioImportService
 from frontend.streamlit_app.cache import clear_all_caches
+from frontend.streamlit_app.components.patterns import (
+    MetricCardSpec,
+    empty_state,
+    metric_card_row,
+    page_header,
+)
 from frontend.streamlit_app.components.sections import section
 from frontend.streamlit_app.components.tables import (
     render_grouped_positions,
     render_positions_table,
 )
 from frontend.streamlit_app.db import session_scope
-from frontend.streamlit_app.formatting import format_brl
+from frontend.streamlit_app.formatting import format_brl, format_pct
 
 
 def _ensure_portfolio(db, portfolio_id: int) -> Portfolio:
@@ -37,7 +44,11 @@ def _ensure_portfolio(db, portfolio_id: int) -> Portfolio:
 
 
 def render(portfolio_id: int) -> None:
-    st.title("Carteira")
+    page_header(
+        "Carteira",
+        "Suas posições, organizadas por classe, moeda e concentração.",
+        icon="💼",
+    )
 
     exchange_rate = fx_settings_service.get_usd_brl_rate()
     with session_scope() as db:
@@ -49,16 +60,45 @@ def render(portfolio_id: int) -> None:
         international_positions = [p for p in view.positions if p.currency != "BRL"]
         brazil_total = sum((p.position_value_brl for p in brazil_positions), view.total_brl * 0)
         international_total = view.total_converted_brl - brazil_total
+        largest = next(
+            (p for p in view.positions if p.ticker == view.largest_position_ticker), None
+        )
+
+        hero_cards: list[MetricCardSpec] = [
+            {
+                "label": "Patrimônio total (convertido)",
+                "value": format_brl(view.total_converted_brl),
+                "icon": "💰",
+                "status": "neutral",
+            },
+            {
+                "label": f"Brasil (BRL) · {len(brazil_positions)} posições",
+                "value": format_brl(brazil_total),
+                "icon": "🇧🇷",
+                "status": "neutral",
+            },
+            {
+                "label": f"Exterior · {len(international_positions)} posições",
+                "value": format_brl(international_total),
+                "icon": "🌎",
+                "status": "neutral",
+            },
+            {
+                "label": "Maior posição",
+                "value": (f"{largest.ticker} ({format_pct(largest.weight)})" if largest else "—"),
+                "icon": "🎯",
+                # Sprint 30 (Parte 9): destaque visual quando a maior posição
+                # sozinha já passa de 20% da carteira — só um sinalizador de
+                # concentração, não um limite de política (esse é configurado
+                # em Configurações e aplicado pelo Decision Engine).
+                "status": (
+                    "attention" if largest and largest.weight >= Decimal("0.20") else "neutral"
+                ),
+            },
+        ]
+        metric_card_row(hero_cards)
 
         with section("Posições atuais", "📌"):
-            col1, col2 = st.columns(2)
-            col1.metric(
-                f"Brasil (BRL) · {len(brazil_positions)} posições", format_brl(brazil_total)
-            )
-            col2.metric(
-                f"Exterior · {len(international_positions)} posições",
-                format_brl(international_total),
-            )
             st.caption(
                 "Clique no cabeçalho de uma coluna para ordenar por valor, peso, rentabilidade ou grupo."
             )
@@ -81,8 +121,11 @@ def render(portfolio_id: int) -> None:
                     + ", ".join(view.estimated_price_tickers)
                 )
     else:
-        with section("Posições atuais", "📌"):
-            st.info("Nenhuma posição ainda. Importe um arquivo abaixo.")
+        empty_state(
+            "Nenhuma posição ainda",
+            "Importe um arquivo CSV ou Excel abaixo para ver sua carteira aqui.",
+            icon="💼",
+        )
 
     st.divider()
     with section("Importar posições (CSV ou Excel)", "📤"):

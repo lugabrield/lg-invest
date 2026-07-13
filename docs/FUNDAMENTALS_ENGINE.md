@@ -1,4 +1,4 @@
-# Fundamentals Foundation (Sprint 13; expandido Sprint 21)
+# Fundamentals Foundation (Sprint 13; expandido Sprints 21 e 26)
 
 ## Objetivo
 
@@ -23,21 +23,41 @@ os serviços.
 
 ## Campos coletados (`FundamentalSnapshot` / `FundamentalSnapshotResult`)
 
-28 campos financeiros opcionais, todos `Decimal | None` (mais
+30 campos financeiros opcionais, todos `Decimal | None` (mais
 `ticker`, `period_end`, `source`, `collected_at`):
 
 `roe, roa, net_margin, ebitda_margin, revenue, net_income, ebitda,
 ebit, free_cash_flow, net_debt, debt_to_ebitda, pe_ratio, pb_ratio,
 ev_ebitda, dividend_yield, payout_ratio, eps, revenue_per_share, beta,
 market_cap, enterprise_value, forward_pe, operating_margin, total_debt,
-total_cash, operating_cash_flow, gross_profit, shares_outstanding`.
+total_cash, operating_cash_flow, gross_profit, shares_outstanding,
+total_equity, roic, interest_coverage`.
 
-Os últimos 9 (`market_cap` até `shares_outstanding`) foram adicionados
-no Sprint 21 (migration `a1f4e6c2b8d9`, puramente aditiva — ver
-`docs/DEPLOYMENT_NOTES.md`).
+Os campos `market_cap` até `shares_outstanding` (9 campos) foram
+adicionados no Sprint 21 (migration `a1f4e6c2b8d9`, puramente aditiva
+— ver `docs/DEPLOYMENT_NOTES.md`). Os 3 últimos — `total_equity`,
+`roic`, `interest_coverage` — foram adicionados no Sprint 26, Fase 1
+(migration `d8a2f5c7b104_add_fundamentals_roic_fields`, também
+puramente aditiva), como pré-requisito do Valuation Engine 2.0 (ver
+`docs/VALUATION_ENGINE_2.md`):
+
+- **`total_equity`** — patrimônio líquido, lido de `Stockholders
+  Equity` (ou `Common Stock Equity` como fallback) nos demonstrativos
+  anuais.
+- **`roic`** — `NOPAT / capital investido`, onde `NOPAT = EBIT x (1 -
+  taxa efetiva de imposto)` e `capital investido = dívida total +
+  patrimônio líquido - caixa`. Só calculado com os 5 componentes TODOS
+  disponíveis simultaneamente.
+- **`interest_coverage`** — `EBIT / despesa financeira`. Só calculado
+  quando ambos existem e a despesa financeira é diferente de zero.
+
+Os três só vêm de `get_history()` (demonstrativos anuais reais) — o
+`.info` "rápido" do yfinance (`get_latest()`) não expõe taxa efetiva de
+imposto nem despesa financeira de forma confiável, então esses campos
+nunca são preenchidos a partir dele, só do histórico anual.
 
 `FundamentalSnapshotResult.coverage_pct` = fração de campos preenchidos
-sobre o total de 28; `missing_fields` lista os campos ausentes
+sobre o total de 30; `missing_fields` lista os campos ausentes
 explicitamente. Nenhum campo ausente é tratado como zero.
 
 ## Fonte: Yahoo Finance (`YahooFundamentalsProvider`)
@@ -122,3 +142,31 @@ operacional), fonte, data do período de referência, cobertura, campos
 indisponíveis explicitamente listados, CAGR (quando calculável),
 tendência de margem, valuation e badges de qualidade de dado. Botões
 para coletar fundamentos de um ativo ou em lote.
+
+## Cobertura de dados e falhas de fonte (Sprint 28)
+
+A cobertura "campo a campo" mencionada acima passou a ser um relatório
+estruturado próprio — o **Data Coverage Report** — em vez de só uma
+lista solta na UI. Ele responde, para qualquer ativo, exatamente quais
+dos 30 campos estão disponíveis, de onde vieram (`"yahoo"` ou
+`"manual_import"`) e o quanto isso é suficiente para cada análise que
+consome fundamentos (Quality, Valuation Engine 2.0, Trap Detection,
+Análise de Renda, Decision Engine). Ver `docs/DATA_COVERAGE_REPORT.md`
+para o detalhamento completo.
+
+Duas peças novas complementam esta engine sem alterá-la:
+
+- **Fallback de dado ausente**: quando o Yahoo Finance não cobre um
+  campo (comum em ações brasileiras de segunda linha), o usuário pode
+  preencher manualmente via importação CSV/Excel — ver
+  `docs/MANUAL_FUNDAMENTALS_IMPORT.md`. `FundamentalsService._upsert`
+  já garantia, desde o Sprint 13, que um valor `None` nunca sobrescreve
+  um valor bom já salvo — a importação manual reaproveita essa mesma
+  garantia via `FundamentalsRepository.upsert_fields`.
+- **Falha de fonte externa nunca apaga dado já salvo**: uma exceção do
+  provider (rede, parsing, rate-limit) é capturada, registrada em log,
+  e o ativo simplesmente não é atualizado nesta rodada — o snapshot já
+  existente no banco permanece intocado. Ver
+  `docs/FUNDAMENTAL_DATA_PROVIDERS.md` para a arquitetura completa de
+  provedores plugáveis e a garantia testada
+  (`test_provider_failure_keeps_existing_snapshot_and_logs_warning`).

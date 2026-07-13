@@ -24,6 +24,7 @@ def test_blocked_asset_is_ignored():
     tickers = {e.ticker for e in eligible}
     assert "VOO" not in tickers
     assert any(i.ticker == "VOO" and "bloqueado" in i.reason for i in ignored)
+    assert next(i for i in ignored if i.ticker == "VOO").block_source == "bloqueio_manual"
 
 
 def test_overconcentrated_asset_is_ignored():
@@ -34,6 +35,7 @@ def test_overconcentrated_asset_is_ignored():
     assert "WEGE3.SA" not in tickers
     assert "ITUB4.SA" in tickers
     assert any("sobreconcentrado" in i.reason for i in ignored)
+    assert ignored[0].block_source == "sobreconcentracao"
 
 
 def test_all_eligible_when_no_restrictions():

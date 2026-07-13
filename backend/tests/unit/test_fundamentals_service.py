@@ -11,6 +11,7 @@ from decimal import Decimal
 from backend.app.etl.contracts.fundamental_data import FundamentalData
 from backend.app.etl.providers.fundamentals_provider import FundamentalsProvider
 from backend.app.infrastructure.database.models.asset import Asset
+from backend.app.infrastructure.database.models.fundamental_snapshot import FundamentalSnapshot
 from backend.app.infrastructure.repositories.asset_repository import AssetRepository
 from backend.app.infrastructure.repositories.fundamentals_repository import (
     FundamentalsRepository,
@@ -116,6 +117,40 @@ def test_provider_failure_is_handled(db_session):
 
     assert result.collected is False
     assert result.error is not None
+
+
+def test_provider_failure_keeps_existing_snapshot_and_logs_warning(db_session, caplog):
+    """Cenário 10 da Parte 8 (Sprint 28): quando a fonte externa falha, o
+    snapshot já existente no banco deve permanecer intocado (nunca é
+    zerado nem substituído por um erro) e a falha deve ser registrada em
+    log — nunca silenciosa."""
+    import logging
+
+    asset = _make_asset(db_session)
+    FundamentalsRepository(db_session).create(
+        FundamentalSnapshot(
+            asset_id=asset.id,
+            period_end=date(2026, 6, 30),
+            source="yahoo",
+            roe=Decimal("0.22"),
+        )
+    )
+
+    provider = FakeFundamentalsProvider(raise_exc=True)
+    service = FundamentalsService(db_session, provider)
+
+    with caplog.at_level(logging.ERROR, logger="lg_invest.fundamentals"):
+        result = service.collect_for_asset("WEGE3.SA")
+
+    assert result.collected is False
+    assert result.error is not None
+    assert any("WEGE3.SA" in record.getMessage() for record in caplog.records)
+
+    snapshot = FundamentalsRepository(db_session).get_by_asset_and_period(
+        asset.id, date(2026, 6, 30)
+    )
+    assert snapshot is not None
+    assert snapshot.roe == Decimal("0.22")  # dado antigo preservado, nunca apagado
 
 
 def test_no_data_from_provider(db_session):

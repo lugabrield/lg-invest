@@ -1,8 +1,8 @@
 {
-  "usd_brl_rate": "5.1714",
+  "usd_brl_rate": "5.1085",
   "usd_brl_source": "bcb",
-  "usd_brl_quote_date": "2026-07-03T13:08:41.147385",
-  "usd_brl_fetched_at": "2026-07-05T07:51:42.514092+00:00",
+  "usd_brl_quote_date": "2026-07-10T13:04:16.356177",
+  "usd_brl_fetched_at": "2026-07-11T20:54:43.305746+00:00",
   "target_allocation": {
     "stock": "0.3",
     "fii": "0.2",

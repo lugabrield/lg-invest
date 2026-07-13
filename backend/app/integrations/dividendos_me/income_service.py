@@ -264,16 +264,28 @@ class IncomeSyncService:
     # --- Histórico mensal agregado (income_monthly_summaries) -------------
 
     def _fetch_and_deduplicate_monthly(
-        self, portfolio_id: int, client: DividendosMeClient
+        self,
+        portfolio_id: int,
+        client: DividendosMeClient,
+        *,
+        debug: bool = False,
+        debug_dir: str | None = None,
     ) -> tuple[list[NormalizedMonthlySummary], list[NormalizedMonthlySummary], list[str], list]:
         """Mesmo princípio de `_fetch_and_deduplicate`, mas para o
         histórico mensal (`client.fetch_income_monthly_summaries()`) —
-        nunca chama a extração do calendário, e vice-versa."""
+        nunca chama a extração do calendário, e vice-versa.
+
+        `debug`/`debug_dir` (ajuste pós-Sprint 25, Parte 3): repassados
+        direto para `client.fetch_income_monthly_summaries()` — permitem
+        salvar um snapshot local (HTML sanitizado + screenshot) quando o
+        diagnóstico padrão (`raw_rows_detected=0`) não for suficiente."""
         portfolio = self.portfolios.get_by_id(portfolio_id)
         if portfolio is None:
             raise PortfolioNotFoundError(f"Carteira {portfolio_id} não existe na LG INVEST.")
 
-        summaries_raw, failed_sections, diagnostics = client.fetch_income_monthly_summaries()
+        summaries_raw, failed_sections, diagnostics = client.fetch_income_monthly_summaries(
+            debug=debug, debug_dir=debug_dir
+        )
         summaries = deduplicate_monthly_summaries_in_batch(summaries_raw, portfolio_id=portfolio_id)
         return summaries_raw, summaries, failed_sections, diagnostics
 
@@ -332,23 +344,37 @@ class IncomeSyncService:
         )
 
     def build_monthly_preview(
-        self, portfolio_id: int, client: DividendosMeClient
+        self,
+        portfolio_id: int,
+        client: DividendosMeClient,
+        *,
+        debug: bool = False,
+        debug_dir: str | None = None,
     ) -> IncomeMonthlySyncPreview:
         """Busca o HISTÓRICO MENSAL agregado (aba "Análise") no
         Dividendos.me e monta o preview — nunca grava nada."""
         summaries_raw, summaries, failed_sections, diagnostics = (
-            self._fetch_and_deduplicate_monthly(portfolio_id, client)
+            self._fetch_and_deduplicate_monthly(
+                portfolio_id, client, debug=debug, debug_dir=debug_dir
+            )
         )
         return self._build_monthly_preview_from_summaries(
             portfolio_id, summaries_raw, summaries, failed_sections, diagnostics
         )
 
     def dry_run_monthly(
-        self, portfolio_id: int, client: DividendosMeClient
+        self,
+        portfolio_id: int,
+        client: DividendosMeClient,
+        *,
+        debug: bool = False,
+        debug_dir: str | None = None,
     ) -> IncomeMonthlySyncRunResult:
         started_at = datetime.now(UTC)
         summaries_raw, summaries, failed_sections, diagnostics = (
-            self._fetch_and_deduplicate_monthly(portfolio_id, client)
+            self._fetch_and_deduplicate_monthly(
+                portfolio_id, client, debug=debug, debug_dir=debug_dir
+            )
         )
         preview = self._build_monthly_preview_from_summaries(
             portfolio_id, summaries_raw, summaries, failed_sections, diagnostics

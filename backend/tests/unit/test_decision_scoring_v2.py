@@ -66,3 +66,22 @@ def test_lower_weight_increases_score():
     concentrated = compute_buy_score_v2(_input(weight="0.40"))
     small = compute_buy_score_v2(_input(weight="0.05"))
     assert small.score > concentrated.score
+
+
+# --- score_breakdown estruturado (Sprint 25, Parte 4) -----------------------
+
+
+def test_v2_score_breakdown_contributions_sum_to_score():
+    s = compute_buy_score_v2(_input(lg=80, conviction=90, class_drift="-0.20"))
+    total = sum((f.contribution for f in s.factors), start=Decimal("0"))
+    assert total == s.score
+
+
+def test_v2_score_breakdown_has_three_factors():
+    s = compute_buy_score_v2(_input())
+    labels = [f.label for f in s.factors]
+    assert labels == [
+        "Qualidade (Conviction/LG Score)",
+        "Bônus classe subalocada",
+        "Concentração invertida",
+    ]

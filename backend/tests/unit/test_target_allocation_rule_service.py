@@ -128,6 +128,37 @@ def test_set_rule_rejects_target_greater_than_max(db_session):
         )
 
 
+def test_set_rule_rejects_min_greater_than_target(db_session):
+    # Ajuste UX Configurações/alocação (pós-Sprint 25): faltava esta
+    # checagem — só min > max e target > max eram bloqueados antes.
+    portfolio_id = _seed_portfolio(db_session)
+    service = TargetAllocationRuleService(db_session)
+
+    with pytest.raises(ValueError):
+        service.set_rule(
+            portfolio_id,
+            dimension_type="class",
+            dimension_key="fii",
+            min_weight=Decimal("0.30"),
+            target_weight=Decimal("0.20"),
+        )
+
+
+def test_set_rule_allows_min_equal_to_target(db_session):
+    portfolio_id = _seed_portfolio(db_session)
+    service = TargetAllocationRuleService(db_session)
+
+    rule = service.set_rule(
+        portfolio_id,
+        dimension_type="class",
+        dimension_key="fii",
+        min_weight=Decimal("0.20"),
+        target_weight=Decimal("0.20"),
+    )
+    assert rule.min_weight == Decimal("0.20")
+    assert rule.target_weight == Decimal("0.20")
+
+
 def test_delete_rule_removes_existing_rule(db_session):
     portfolio_id = _seed_portfolio(db_session)
     service = TargetAllocationRuleService(db_session)

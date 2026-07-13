@@ -2,7 +2,7 @@
 
 Engine PURA: recebe os candidatos já tratados e o valor do aporte e
 devolve um `RecommendationResult` com a distribuição, justificativas,
-alertas, nível de confiança e log de auditoria.
+alertas, nível de confiança e o log de auditoria.
 
 Fluxo (Volume 7, seção 5):
     filtrar elegíveis -> pontuar -> distribuir -> explicar -> auditar
@@ -21,17 +21,29 @@ from backend.app.engines.decision.inputs import (
     PolicyLimits,
     PortfolioAggregates,
 )
+from backend.app.engines.decision.post_allocation import apply_post_allocation_constraints
 from backend.app.engines.decision.scoring import (
     compute_buy_score,
     compute_buy_score_v2,
     compute_buy_score_v3,
 )
 from backend.app.schemas.recommendation_result import (
+    CappedDimensionResult,
     DecisionAudit,
     IgnoredItem,
     RecommendationItem,
     RecommendationResult,
+    ScoreFactor,
 )
+
+# Sprint 29: limiares do alerta de "aporte grande demais em relação ao
+# patrimônio" — pedido explícito do usuário após um aporte de R$ 1 milhão
+# numa carteira de R$ 40 mil ter estourado o limite máximo de exposição
+# em USD (97,23% quando o máximo configurado era 60%). O corte em si é
+# feito pelo Post-Allocation Constraints Engine; este alerta só avisa
+# ANTES de o usuário ler a distribuição que a simulação é extrema.
+_LARGE_CONTRIBUTION_RATIO = Decimal("0.25")
+_EXTREME_CONTRIBUTION_RATIO = Decimal("1.0")
 
 MODEL_VERSION = "decision_v1"
 MODEL_VERSION_V2 = "decision_v2"
@@ -46,6 +58,16 @@ def _confidence_label(confidence: Decimal) -> str:
     if pct >= Decimal("60"):
         return "Média"
     return "Baixa"
+
+
+def _score_breakdown(score) -> list[ScoreFactor]:
+    """Converte `BuyScore.factors` (dataclass puro da engine) para o
+    schema `ScoreFactor` (Sprint 25, Parte 4) — mesma conversão nos três
+    motores, sem duplicar a lista comprehension em cada `recommend*`."""
+    return [
+        ScoreFactor(label=f.label, weight=f.weight, value=f.value, contribution=f.contribution)
+        for f in score.factors
+    ]
 
 
 def recommend(
@@ -82,6 +104,7 @@ def recommend(
                 lg_score=c.lg_score,
                 item_confidence=c.confidence,
                 reasons=s.reasons,
+                score_breakdown=_score_breakdown(s),
             )
         )
 
@@ -107,7 +130,10 @@ def recommend(
         contribution_amount=amount,
         allocated_amount=allocated_total,
         items=items,
-        ignored=[IgnoredItem(ticker=i.ticker, reason=i.reason) for i in ignored],
+        ignored=[
+            IgnoredItem(ticker=i.ticker, reason=i.reason, block_source=i.block_source)
+            for i in ignored
+        ],
         alerts=alerts,
         confidence=confidence,
         confidence_label=_confidence_label(confidence),
@@ -159,6 +185,7 @@ def recommend_v2(
                 conviction_score=c.conviction_score,
                 item_confidence=c.confidence,
                 reasons=s.reasons,
+                score_breakdown=_score_breakdown(s),
             )
         )
 
@@ -187,7 +214,10 @@ def recommend_v2(
         contribution_amount=amount,
         allocated_amount=allocated_total,
         items=items,
-        ignored=[IgnoredItem(ticker=i.ticker, reason=i.reason) for i in ignored],
+        ignored=[
+            IgnoredItem(ticker=i.ticker, reason=i.reason, block_source=i.block_source)
+            for i in ignored
+        ],
         alerts=alerts,
         confidence=confidence,
         confidence_label=_confidence_label(confidence),
@@ -256,6 +286,7 @@ def recommend_v3(
     config: DecisionConfig = DEFAULT_CONFIG,
     policy: PolicyLimits | None = None,
     aggregates: PortfolioAggregates | None = None,
+    portfolio_value_before: Decimal | None = None,
 ) -> RecommendationResult:
     """Gera a recomendação de aporte v3 (Sprint 24, Fase 4): score
     multi-fator (fundamentos/quality/valuation/growth/risk + alocação-alvo
@@ -268,6 +299,15 @@ def recommend_v3(
     distribuir -> explicar -> auditar); `policy`/`aggregates` ausentes
     (`None`) fazem o v3 se comportar como se não houvesse política
     configurada — nunca inventa limites.
+
+    `portfolio_value_before` (Sprint 29): patrimônio real da carteira em
+    R$, necessário para o Post-Allocation Constraints Engine simular o
+    peso de cada dimensão DEPOIS do aporte e cortar qualquer dimensão
+    que ultrapassaria seu máximo configurado — correção do bug em que um
+    aporte muito maior que o patrimônio atual conseguia estourar um
+    limite máximo (ex.: 97% de exposição em USD com máximo configurado
+    de 60%). Quando `None` (chamador não tem esse dado), a simulação
+    pós-aporte é pulada — nunca inventa um patrimônio para simular.
     """
     if amount <= 0:
         raise ValueError("O valor do aporte deve ser positivo.")
@@ -287,6 +327,36 @@ def recommend_v3(
     new_asset_tickers = frozenset(c.ticker for c in eligible if c.is_new_from_watchlist)
 
     allocations = select_and_distribute(scores, amount, config, new_asset_tickers=new_asset_tickers)
+
+    # Sprint 29: Post-Allocation Constraints — corta a distribuição acima
+    # se alguma dimensão (classe/moeda/país/ativo/exposição internacional)
+    # ultrapassaria seu máximo configurado DEPOIS do aporte.
+    capped_dimensions: list[CappedDimensionResult] = []
+    post_allocation_reasons: list[str] = []
+    if portfolio_value_before is not None:
+        pa_result = apply_post_allocation_constraints(
+            allocations,
+            input_by_ticker,
+            portfolio_value_before,
+            amount,
+            policy=policy,
+            aggregates=aggregates,
+        )
+        allocations = pa_result.allocations
+        post_allocation_reasons = pa_result.reasons
+        capped_dimensions = [
+            CappedDimensionResult(
+                dimension_type=cd.dimension_type,
+                dimension_key=cd.dimension_key,
+                label=cd.label,
+                weight_before=cd.weight_before,
+                weight_after=cd.weight_after,
+                max_weight=cd.max_weight,
+                source=cd.source,
+            )
+            for cd in pa_result.capped_dimensions
+        ]
+
     allocated_total = sum((a.amount for a in allocations), start=Decimal("0"))
 
     items: list[RecommendationItem] = []
@@ -304,7 +374,9 @@ def recommend_v3(
                 conviction_score=c.conviction_score,
                 item_confidence=c.confidence,
                 reasons=s.reasons,
+                score_breakdown=_score_breakdown(s),
                 is_new_from_watchlist=c.is_new_from_watchlist,
+                watchlist_reason=(_watchlist_reason(config) if c.is_new_from_watchlist else None),
             )
         )
 
@@ -323,6 +395,22 @@ def recommend_v3(
             f"inicial está limitada a {config.max_new_asset_weight * 100:.0f}% do aporte "
             "para ativos que você ainda não possui."
         )
+    # Sprint 29: dimensões cortadas pelo Post-Allocation Constraints Engine
+    # (nunca um bloqueio silencioso — o motivo explícito de cada corte
+    # sempre vira alerta, mesma disciplina do resto do Decision Engine).
+    alerts.extend(post_allocation_reasons)
+    if portfolio_value_before is not None and portfolio_value_before > 0:
+        contribution_ratio = amount / portfolio_value_before
+        if contribution_ratio > _EXTREME_CONTRIBUTION_RATIO:
+            alerts.append(
+                "Aporte maior que a carteira atual. A simulação muda drasticamente a "
+                "alocação e pode exigir uma estratégia de entrada gradual."
+            )
+        elif contribution_ratio > _LARGE_CONTRIBUTION_RATIO:
+            alerts.append(
+                "Este aporte é grande em relação ao patrimônio atual. A recomendação foi "
+                "limitada por regras de alocação pós-aporte."
+            )
     explanation = _build_explanation_v3(items, amount, allocated_total)
 
     audit = DecisionAudit(
@@ -343,12 +431,29 @@ def recommend_v3(
         contribution_amount=amount,
         allocated_amount=allocated_total,
         items=items,
-        ignored=[IgnoredItem(ticker=i.ticker, reason=i.reason) for i in ignored],
+        ignored=[
+            IgnoredItem(ticker=i.ticker, reason=i.reason, block_source=i.block_source)
+            for i in ignored
+        ],
         alerts=alerts,
         confidence=confidence,
         confidence_label=_confidence_label(confidence),
         explanation=explanation,
         audit=audit,
+        capped_dimensions=capped_dimensions,
+    )
+
+
+def _watchlist_reason(config: DecisionConfig) -> str:
+    """Explica por que um candidato novo da Watchlist/Radar está nesta
+    recomendação (Sprint 25, Parte 4) — mesma regra já aplicada em
+    `select_and_distribute` (teto `max_new_asset_weight`), só que
+    exposta por item em vez de só num alerta agregado."""
+    return (
+        "Candidato novo do Watchlist/Radar — ainda não é posição na sua carteira. "
+        f"Por isso a alocação inicial é limitada a {config.max_new_asset_weight * 100:.0f}% "
+        "do aporte, mesmo com score alto. Nada aqui inicia a posição sozinho: iniciar (e "
+        "quando) continua sendo sua decisão."
     )
 
 

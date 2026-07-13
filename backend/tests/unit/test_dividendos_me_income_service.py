@@ -63,9 +63,11 @@ class _FakeMonthlyClient:
         self._failed_sections = failed_sections or []
         self._diagnostics = diagnostics or []
         self.call_count = 0
+        self.debug_calls = []
 
-    def fetch_income_monthly_summaries(self):
+    def fetch_income_monthly_summaries(self, *, debug=False, debug_dir=None):
         self.call_count += 1
+        self.debug_calls.append((debug, debug_dir))
         return self._summaries, self._failed_sections, self._diagnostics
 
 

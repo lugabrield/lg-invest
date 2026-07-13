@@ -43,12 +43,16 @@ def render_insight_list(insights: list[DiagnosticInsight]) -> None:
     for insight in insights:
         color = SEVERITY_COLORS.get(insight.severity, SEVERITY_COLORS["info"])
         icon = SEVERITY_ICONS.get(insight.severity, "ℹ️")
-        st.markdown(
-            f"""
-            <div class="lg-insight-card" style="--lg-insight-color: {color};">
-                <div class="lg-insight-title">{icon} {insight.title}</div>
-                <div class="lg-insight-message">{insight.message}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        # HTML montado numa única linha, sem indentação/quebra interna: uma
+        # f-string multi-linha indentada (o formato antigo aqui) faz o
+        # Markdown do Streamlit tratar o HTML como bloco de código literal
+        # em vez de renderizar — mesmo com unsafe_allow_html=True. Ver a
+        # nota equivalente em components/patterns.py (Sprint 31, bugfix de
+        # HTML cru na interface).
+        html = (
+            f'<div class="lg-insight-card" style="--lg-insight-color: {color};">'
+            f'<div class="lg-insight-title">{icon} {insight.title}</div>'
+            f'<div class="lg-insight-message">{insight.message}</div>'
+            "</div>"
         )
+        st.markdown(html, unsafe_allow_html=True)

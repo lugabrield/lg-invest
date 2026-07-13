@@ -14,7 +14,9 @@ manualmente (ou, no futuro, importado) — nunca inventado por uma engine.
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Index, String, Text
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.infrastructure.database.base import Base, TimestampMixin
@@ -60,6 +62,10 @@ class WatchlistAsset(Base, TimestampMixin):
     # "manual" (cadastrado na tela Radar), "imported" (upload em lote,
     # futuro), "future_api" (integração futura) — nunca inventa a origem.
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+
+    # Quando `collect_data_for_asset` rodou com sucesso pela última vez.
+    # `None` até a primeira coleta — nunca inventado, só a UI mostra "—".
+    last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
 
     __table_args__ = (
         Index(

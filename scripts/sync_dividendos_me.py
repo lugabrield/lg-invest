@@ -186,6 +186,13 @@ def _income_monthly_preview_to_dict(preview) -> dict:
                 "rejected_rows": d.rejected_rows,
                 "rejection_reasons": d.rejection_reasons,
                 "navigation_detail": d.navigation_detail,
+                "final_url": d.final_url,
+                "tabs_found": d.tabs_found,
+                "wallet_selectors_found": d.wallet_selectors_found,
+                "table_elements_found": d.table_elements_found,
+                "canvas_or_svg_detected": d.canvas_or_svg_detected,
+                "debug_snapshot_path": d.debug_snapshot_path,
+                "debug_screenshot_path": d.debug_screenshot_path,
             }
             for d in preview.diagnostics
         ],
@@ -247,6 +254,20 @@ def main() -> None:
         action="store_true",
         help="Pula a extração de proventos (mais rápido, só sincroniza a carteira).",
     )
+    parser.add_argument(
+        "--debug-income-monthly",
+        action="store_true",
+        help=(
+            "Salva localmente um snapshot de HTML sanitizado + screenshot do estado final "
+            "da extração do histórico mensal (aba Análise) — nunca enviado a lugar nenhum, "
+            "só para investigar por que raw_rows_detected ficou em 0."
+        ),
+    )
+    parser.add_argument(
+        "--debug-dir",
+        default=None,
+        help="Diretório local para os snapshots de --debug-income-monthly (default: ./debug_dividendos_me).",
+    )
     args = parser.parse_args()
     include_income = not args.skip_income
 
@@ -281,7 +302,12 @@ def main() -> None:
                 # misturado com o calendário futuro abaixo.
                 try:
                     if args.mode == "dry-run":
-                        monthly_result = income_service.dry_run_monthly(args.portfolio_id, client)
+                        monthly_result = income_service.dry_run_monthly(
+                            args.portfolio_id,
+                            client,
+                            debug=args.debug_income_monthly,
+                            debug_dir=args.debug_dir,
+                        )
                     else:
                         monthly_result = income_service.import_monthly_summaries(
                             args.portfolio_id, client

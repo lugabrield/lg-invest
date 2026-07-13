@@ -27,18 +27,21 @@ separados:
 - **Nenhum dado é inventado.** Sem preço/fundamentos suficientes, o
   resultado vira `insufficient_data` (Radar) ou `low_confidence=True`
   (coleta de dados da Watchlist) — nunca um placeholder fabricado.
-- Testes: `test_watchlist_service.py` (17), `test_radar_engine.py` (13),
+- Testes: `test_watchlist_service.py` (21), `test_radar_engine.py` (15),
   `test_radar_service.py` (5), `test_decision_watchlist_integration.py` (7),
   `test_decision_allocation_limits.py` (9 no total, 5 novos para o teto de
-  ativo novo).
+  ativo novo), `test_watchlist_status_radar_integration.py` (8, cadeia real
+  Watchlist → Radar → Decision Engine, sem mock no `RadarService`).
 
 ## Watchlist
 
-### Modelo (`watchlist_assets`, migration `a3f7c9e2d156`)
+### Modelo (`watchlist_assets`, migrations `a3f7c9e2d156` + `b7e4d1f8a293`)
 
 Campos: `id`, `portfolio_id`, `ticker`, `name`, `asset_class`, `country`,
 `currency`, `sector`, `status`, `priority` (0-10, manual), `thesis`, `notes`,
-`source` ("manual"/"imported"/"future_api"), `created_at`, `updated_at`.
+`source` ("manual"/"imported"/"future_api"), `last_collected_at`
+(preenchido só por `collect_data_for_asset`, `None` até a primeira coleta —
+migration `b7e4d1f8a293`, aditiva), `created_at`, `updated_at`.
 Índice único em `(portfolio_id, ticker)` — um ticker só pode ter um registro
 ativo por carteira.
 
@@ -61,6 +64,24 @@ ativo por carteira.
 CRUD: `add_watchlist_asset`, `update_watchlist_asset`, `remove_watchlist_asset`,
 `list_watchlist_assets`, `get_watchlist_asset_by_ticker`, `set_status`,
 `mark_as_bought`, `block_asset`, `discard_asset`.
+
+### Troca de status (ajuste pós-Sprint 25)
+
+`WatchlistService.set_status(portfolio_id, watchlist_asset_id, status)` já
+aceitava **qualquer** transição entre os 5 status desde a Parte 2.2 — o
+ajuste foi só na tela Radar, que só expunha atalhos de um sentido só
+(bloquear/descartar/marcar comprado). Agora a tela tem um seletor de status
+livre + botão "Atualizar status", que cobre qualquer direção: `watching` →
+`candidate`, `candidate` → `watching`, `blocked` → `candidate`, `discarded`
+→ `candidate`, `candidate` → `blocked`, `candidate` → `discarded`, etc.
+Sempre pelo mesmo registro (`update`, nunca `create`) — nunca duplica o
+ticker, nunca cria `Position`, nunca muda o patrimônio. Depois de qualquer
+troca, `clear_all_caches()` invalida o cache de leitura do Streamlit e a
+tela recarrega com `st.rerun()`.
+
+Testes: `test_set_status_covers_every_required_transition` (parametrizado
+com as 6 transições pedidas) e `test_set_status_never_creates_position_or_changes_patrimonio`
+em `test_watchlist_service.py`.
 
 Validações (`WatchlistAssetCreate`/`WatchlistAssetUpdate`, Pydantic):
 ticker/name obrigatórios, `asset_class` precisa estar em `ASSET_CLASSES`,
@@ -166,17 +187,23 @@ duplicar a lógica de precedência dentro do Radar; ver
   recomendação, a tela separa visualmente "Já tenho" de "Novo candidato
   (Watchlist)", cada um com sua própria justificativa por ativo.
 
-## Tela Radar (Sprint 25, Parte 2.6)
+## Tela Radar (Sprint 25, Parte 2.6; ajustada na sprint seguinte)
 
 `pages_impl/radar.py`, registrada em `app.py` na ordem: Dashboard, Carteira,
 Ativos, Inteligência, Aporte, Simulação, **Radar**, Journal, Sincronizar
 Dividendos.me, Configurações.
 
-Seções: resumo da Watchlist (contagem por status), formulário de cadastro
-rápido, tabela da Watchlist com ações (coletar dados de um/de todos,
-bloquear, descartar, marcar comprado, remover), e o Radar de oportunidades
-propriamente dito — uma seção por classificação, com tabela e explicação
-por ativo (`reasons` do `RadarClassificationResult`).
+Seções: 📌 resumo da Watchlist (contagem por status), ➕ formulário de
+cadastro rápido, 📋 tabela da Watchlist (agora com Score/Confiança/
+Classificação do Radar/Última coleta, mostrando "—" quando o dado ainda
+não existe — nunca inventado) com ações "Coletar dados"/"Remover" + o
+seletor de "Alterar status" (qualquer transição, ver seção acima), e 🎯 o
+Radar de oportunidades propriamente dito — uma seção por classificação,
+com tabela e explicação por ativo (`reasons` do `RadarClassificationResult`).
+
+`last_collected_at` só é preenchido quando `collect_data_for_asset` roda
+com sucesso (migration `b7e4d1f8a293`) — nunca retroativo, nunca inventado
+para registros antigos.
 
 ## Como validar localmente
 
@@ -190,13 +217,18 @@ DATABASE_URL="sqlite:////tmp/lg_watchlist_test.db" python -m alembic upgrade hea
 python -m pytest backend/tests/unit/test_watchlist_service.py -v
 python -m pytest backend/tests/unit/test_radar_engine.py backend/tests/unit/test_radar_service.py -v
 python -m pytest backend/tests/unit/test_decision_watchlist_integration.py -v
+python -m pytest backend/tests/unit/test_watchlist_status_radar_integration.py -v
 ```
 
-Na UI: abra a tela **Radar**, cadastre um candidato, clique em "Coletar
+Na UI: abra a tela **Radar**, cadastre um candidato como `watching`,
+selecione-o na lista, escolha `candidate` em "Novo status" e clique em
+"Atualizar status" — a mensagem "Status de TICKER atualizado para
+candidate" confirma a troca, sem recriar o registro. Clique em "Coletar
 dados" (o score vai ficar com confiança baixa até fundamentos/preço serem
 coletados de verdade pela tela Ativos), depois vá em **Aporte**, escolha o
 motor v3 e marque "Permitir ativos novos da watchlist" para ver o candidato
-aparecer separado em "Novo candidato (Watchlist)".
+aparecer separado em "Novo candidato (Watchlist)" — só depois de promovido
+para `candidate` (um ativo `watching` nunca aparece ali).
 
 ## O que ainda não existe
 

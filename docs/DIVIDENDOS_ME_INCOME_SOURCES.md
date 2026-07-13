@@ -41,6 +41,53 @@ anuais de 2021-2025) — ver
 `test_parse_monthly_summary_multi_year_matches_real_totals_reported_by_user`
 em `backend/tests/unit/test_dividendos_me_income_parser.py`.
 
+### Correção de timing + diagnóstico reforçado (ajuste pós-Sprint 25, Parte 3)
+
+Bug real reportado: `sync_dividendos_me.py --dry-run` retornava
+`income_monthly: monthly_income_found: 0, raw_rows_detected: 0` mesmo
+quando a Fonte A tem dado real na conta do usuário. Causa identificada:
+`_extract_monthly_summary_all_wallets` fazia UMA ÚNICA leitura da tabela
+por carteira, sem esperar a tabela renderizar nem tentar de novo — mesma
+classe de bug de timing já corrigida em `_extract_table_section` (Sprint
+23.3) para a extração da carteira principal, mas nunca aplicada aqui.
+
+Correção: `_extract_monthly_table_with_retry` agora espera a `<table>`
+aparecer (`wait_for_selector`) e, se a primeira leitura vier vazia, espera
+`_RETRY_WAIT_MS` (1.8s) e tenta ler de novo antes de considerar a
+carteira sem dado — mesmo padrão retry-on-empty já usado para Brasil/EUA.
+
+Além da correção, `fetch_income_monthly_summaries()` ganhou um
+diagnóstico mais forte (`DividendosMeClient._diagnose_income_page`),
+coletado tanto no sucesso quanto na falha, sempre honesto (nunca inventa
+estrutura de DOM não confirmada ao vivo):
+
+- `final_url`: URL da página no momento da coleta.
+- `tabs_found`: quais rótulos de aba conhecidos ("Análise", "Próximos
+  Dividendos") foram de fato encontrados na página.
+- `wallet_selectors_found`: quais rótulos de carteira conhecidos
+  ("Carteira (B3)", "Carteira Dolar") foram encontrados.
+- `table_elements_found`: quantidade de `<table>` no DOM.
+- `canvas_or_svg_detected`: `True` se houver `<canvas>`/`<svg>` — indício
+  de que o dado é renderizado como gráfico, não como tabela HTML.
+
+Modo debug opcional (nunca ligado por padrão, nunca envia nada a lugar
+nenhum): `python -m scripts.sync_dividendos_me dry-run --debug-income-monthly
+[--debug-dir CAMINHO]` salva localmente, só se `raw_rows_detected`
+continuar zerado depois da correção de timing, um snapshot de HTML
+sanitizado (sem `<script>`/`<style>`, truncado a 50.000 caracteres) e um
+screenshot da página no estado final da extração — para o usuário
+inspecionar manualmente por que a extração não encontrou a tabela
+esperada. Uma falha ao salvar o snapshot/screenshot nunca mascara o
+resultado real da extração (cada etapa tem seu próprio `try/except`).
+
+Testado em `backend/tests/unit/test_dividendos_me_client.py`: retry em
+`_extract_monthly_table_with_retry` (sucesso na 1ª leitura, sucesso na
+2ª após retry, falha em ambas), diagnóstico honesto de abas/carteiras/
+tabelas/canvas encontrados ou não, diagnóstico nunca levanta exceção
+mesmo com `evaluate`/`get_by_text` quebrados, modo debug liga/desliga o
+salvamento de HTML e screenshot corretamente e nunca derruba a extração
+se o salvamento falhar.
+
 ## Fonte B — Dividendos por ativo/mês (NÃO implementada — limitação documentada)
 
 **Tela:** Renda Variável → Brasil → Gráficos → **Dividendos por Ativo**

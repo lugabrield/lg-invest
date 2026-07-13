@@ -111,9 +111,12 @@ def test_build_inputs_v3_no_signals_without_rules(db_session):
 
 def test_policy_limits_and_aggregates_computes_crypto_weight(db_session):
     portfolio_id, _, _ = _seed_portfolio(db_session)
-    policy, aggregates = DecisionService(db_session)._policy_limits_and_aggregates(portfolio_id)
+    policy, aggregates, portfolio_value_before = DecisionService(
+        db_session
+    )._policy_limits_and_aggregates(portfolio_id)
     assert aggregates.crypto_weight > Decimal("0")
     assert aggregates.international_weight > Decimal("0")
+    assert portfolio_value_before > Decimal("0")
 
 
 def test_recommend_v3_blocks_crypto_over_policy_limit(db_session):

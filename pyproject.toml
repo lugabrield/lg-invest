@@ -1,13 +1,11 @@
 [project]
 name = "lg-invest"
-version = "0.1.0"
-description = "LG INVEST - Investment Intelligence Platform (MVP)"
+version = "1.0.0"
+description = "LG INVEST - Investment Intelligence Platform"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
 
-# Dependências mínimas do MVP. Nada além do necessário para o setup + engines do MVP.
-# Engines financeiras e ETL ainda não são implementados neste sprint.
 dependencies = [
     "sqlalchemy>=2.0,<2.1",
     "alembic>=1.13,<2.0",

@@ -78,3 +78,53 @@ class TargetAllocationEvaluation(BaseModel):
 
     def by_dimension(self, dimension_type: str) -> list[AllocationRuleEvaluation]:
         return [e for e in self.evaluations if e.dimension_type == dimension_type]
+
+
+# --- Precedência e conflitos entre camadas (ajuste UX Configurações/alocação,
+# pós-Sprint 25) ---------------------------------------------------------
+#
+# Espelha `engines/target_allocation/precedence.py` — ver docstring de lá
+# para a explicação completa da precedência regra detalhada > política
+# geral > nenhum limite. Estes schemas só existem para a UI exibir isso
+# de forma explícita; não alimentam o Decision Engine.
+
+EFFECTIVE_LIMIT_SOURCES = ("regra_detalhada", "politica_geral")
+
+EFFECTIVE_LIMIT_SOURCE_LABELS = {
+    "regra_detalhada": "Regra detalhada",
+    "politica_geral": "Política geral",
+}
+
+
+class EffectiveLimitView(BaseModel):
+    """Limite máximo efetivo para uma dimensão, com a origem explícita."""
+
+    dimension_type: str
+    dimension_key: str
+    max_weight: Decimal
+    source: str  # ver EFFECTIVE_LIMIT_SOURCES
+    overridden_policy_value: Decimal | None = None
+
+
+CONFLICT_SIMPLE_VS_DETAILED = "simple_vs_detailed"
+CONFLICT_SUM_NOT_100 = "sum_not_100"
+CONFLICT_MIN_GREATER_THAN_TARGET = "min_greater_than_target"
+CONFLICT_KINDS = (
+    CONFLICT_SIMPLE_VS_DETAILED,
+    CONFLICT_SUM_NOT_100,
+    CONFLICT_MIN_GREATER_THAN_TARGET,
+)
+
+
+class AllocationConflictView(BaseModel):
+    kind: str  # ver CONFLICT_KINDS
+    message: str
+
+
+class AllocationOverview(BaseModel):
+    """Visão consolidada das três camadas para a tela de Configurações:
+    limites efetivos (com origem) e conflitos detectados entre elas.
+    Nunca grava nada, nunca é usada pelo Decision Engine."""
+
+    effective_limits: list[EffectiveLimitView] = []
+    conflicts: list[AllocationConflictView] = []

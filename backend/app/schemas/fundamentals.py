@@ -43,6 +43,12 @@ _RATIO_FIELDS = (
     "operating_cash_flow",
     "gross_profit",
     "shares_outstanding",
+    # Sprint 26, Fase 1 (Análise Fundamentalista Avançada / Valuation
+    # Engine 2.0) — ver `etl/contracts/fundamental_data.py` para a
+    # fórmula e as limitações de cobertura de cada campo.
+    "total_equity",
+    "roic",
+    "interest_coverage",
 )
 
 
@@ -84,6 +90,11 @@ class FundamentalSnapshotResult(BaseModel):
     operating_cash_flow: Decimal | None = None
     gross_profit: Decimal | None = None
     shares_outstanding: Decimal | None = None
+
+    # Sprint 26, Fase 1 — ver `etl/contracts/fundamental_data.py`.
+    total_equity: Decimal | None = None
+    roic: Decimal | None = None
+    interest_coverage: Decimal | None = None
 
     model_config = {"from_attributes": True}
 

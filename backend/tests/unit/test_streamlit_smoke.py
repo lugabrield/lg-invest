@@ -21,6 +21,7 @@ PAGE_MODULES = [
     "frontend.streamlit_app.pages_impl.radar",
     "frontend.streamlit_app.pages_impl.journal",
     "frontend.streamlit_app.pages_impl.configuracoes",
+    "frontend.streamlit_app.pages_impl.sincronizar_dividendos_me",
 ]
 
 

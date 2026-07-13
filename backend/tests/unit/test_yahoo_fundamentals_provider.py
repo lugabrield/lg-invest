@@ -60,12 +60,18 @@ class _FakeTicker:
             "revenuePerShare": 28.0,
             "beta": 0.9,
             "mostRecentQuarter": 1735689600,
+            "bookValue": 10.0,
+            "sharesOutstanding": 50_000,
         }
         self.income_stmt = _FakeFrame(
             {
                 "Total Revenue": {date(2024, 12, 31): 1_000_000, date(2023, 12, 31): 900_000},
                 "Net Income": {date(2024, 12, 31): 180_000, date(2023, 12, 31): 150_000},
                 "EBITDA": {date(2024, 12, 31): 300_000, date(2023, 12, 31): 260_000},
+                "EBIT": {date(2024, 12, 31): 220_000, date(2023, 12, 31): 190_000},
+                "Tax Provision": {date(2024, 12, 31): 40_000, date(2023, 12, 31): 38_000},
+                "Pretax Income": {date(2024, 12, 31): 200_000, date(2023, 12, 31): 190_000},
+                "Interest Expense": {date(2024, 12, 31): 20_000, date(2023, 12, 31): 19_000},
             },
             columns=[date(2024, 12, 31), date(2023, 12, 31)],
         )
@@ -75,6 +81,10 @@ class _FakeTicker:
                 "Cash And Cash Equivalents": {
                     date(2024, 12, 31): 100_000,
                     date(2023, 12, 31): 90_000,
+                },
+                "Stockholders Equity": {
+                    date(2024, 12, 31): 500_000,
+                    date(2023, 12, 31): 450_000,
                 },
             },
             columns=[date(2024, 12, 31), date(2023, 12, 31)],
@@ -128,6 +138,113 @@ def test_get_history_parses_statements(monkeypatch):
     assert first.net_margin == Decimal("180000") / Decimal("1000000")
     assert first.free_cash_flow == Decimal("150000")
     assert first.net_debt == Decimal("300000")
+
+
+# --- ROIC / cobertura de juros / total_equity (Sprint 26, Fase 1) ----------
+
+
+def test_get_latest_computes_total_equity_from_book_value_and_shares(monkeypatch):
+    """total_equity = bookValue (por ação) x sharesOutstanding — mesma base
+    já usada pelo próprio priceToBook publicado pelo yfinance, não um valor
+    inventado. Não é calculado em get_latest: roic/interest_coverage exigem
+    dado de demonstrativo que `.info` não expõe com confiança."""
+    _install_fake_yfinance(monkeypatch)
+    provider = YahooFundamentalsProvider()
+    data = provider.get_latest("WEGE3.SA")
+
+    assert data is not None
+    assert data.total_equity == Decimal("10.0") * Decimal("50000")
+    assert data.roic is None
+    assert data.interest_coverage is None
+
+
+def test_get_latest_total_equity_none_without_book_value(monkeypatch):
+    class _NoBookValueTicker:
+        def __init__(self, symbol):
+            self.info = {"returnOnEquity": 0.28, "mostRecentQuarter": 1735689600}
+
+    _install_fake_yfinance(monkeypatch, _NoBookValueTicker)
+    provider = YahooFundamentalsProvider()
+    data = provider.get_latest("WEGE3.SA")
+
+    assert data is not None
+    assert data.total_equity is None
+
+
+def test_get_history_computes_roic_and_interest_coverage_from_statements(monkeypatch):
+    """ROIC = NOPAT / capital investido; NOPAT = EBIT x (1 - alíquota
+    efetiva). Com EBIT=220000, Tax Provision=40000, Pretax Income=200000
+    (alíquota=20%), Total Debt=400000, Stockholders Equity=500000,
+    Cash=100000: invested_capital=800000, NOPAT=176000, roic=0.22.
+    interest_coverage = EBIT / |Interest Expense| = 220000/20000 = 11."""
+    _install_fake_yfinance(monkeypatch)
+    provider = YahooFundamentalsProvider()
+    history = provider.get_history("WEGE3.SA")
+
+    first = history[0]
+    assert first.period_end == date(2024, 12, 31)
+    assert first.total_equity == Decimal("500000")
+    assert first.roic == Decimal("0.22")
+    assert first.interest_coverage == Decimal("11")
+
+
+def test_get_history_roic_none_when_tax_rate_outside_sane_range(monkeypatch):
+    """Alíquota efetiva fora de [0, 1] (ex.: crédito fiscal pontual gerando
+    provisão negativa) não deve virar um ROIC inventado/distorcido — fica
+    None, nunca aproximado."""
+
+    class _WeirdTaxTicker:
+        def __init__(self, symbol):
+            self.info = {}
+            self.income_stmt = _FakeFrame(
+                {
+                    "Total Revenue": {date(2024, 12, 31): 1_000_000},
+                    "Net Income": {date(2024, 12, 31): 180_000},
+                    "EBIT": {date(2024, 12, 31): 220_000},
+                    "Tax Provision": {date(2024, 12, 31): -50_000},  # crédito fiscal
+                    "Pretax Income": {date(2024, 12, 31): 200_000},
+                },
+                columns=[date(2024, 12, 31)],
+            )
+            self.balance_sheet = _FakeFrame(
+                {
+                    "Total Debt": {date(2024, 12, 31): 400_000},
+                    "Cash And Cash Equivalents": {date(2024, 12, 31): 100_000},
+                    "Stockholders Equity": {date(2024, 12, 31): 500_000},
+                },
+                columns=[date(2024, 12, 31)],
+            )
+            self.cashflow = _FakeFrame({}, columns=[date(2024, 12, 31)])
+
+    _install_fake_yfinance(monkeypatch, _WeirdTaxTicker)
+    provider = YahooFundamentalsProvider()
+    history = provider.get_history("WEIRD3.SA")
+
+    assert history[0].roic is None
+    assert history[0].total_equity == Decimal("500000")  # componente independente segue disponível
+
+
+def test_get_history_interest_coverage_none_without_interest_expense_row(monkeypatch):
+    class _NoInterestExpenseTicker:
+        def __init__(self, symbol):
+            self.info = {}
+            self.income_stmt = _FakeFrame(
+                {
+                    "Total Revenue": {date(2024, 12, 31): 1_000_000},
+                    "Net Income": {date(2024, 12, 31): 180_000},
+                    "EBIT": {date(2024, 12, 31): 220_000},
+                },
+                columns=[date(2024, 12, 31)],
+            )
+            self.balance_sheet = _FakeFrame({}, columns=[date(2024, 12, 31)])
+            self.cashflow = _FakeFrame({}, columns=[date(2024, 12, 31)])
+
+    _install_fake_yfinance(monkeypatch, _NoInterestExpenseTicker)
+    provider = YahooFundamentalsProvider()
+    history = provider.get_history("NOINT3.SA")
+
+    assert history[0].interest_coverage is None
+    assert history[0].roic is None  # sem total_equity/tax data disponível tampouco
 
 
 def test_get_history_empty_when_no_income_statement(monkeypatch):

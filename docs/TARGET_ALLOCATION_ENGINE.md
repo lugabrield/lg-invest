@@ -182,3 +182,150 @@ tabela `target_allocation_rules` com índice único
 `(portfolio_id, dimension_type, dimension_key)`. Testada nesta sprint via
 `alembic upgrade head` / `downgrade -1` / `upgrade head` contra um banco
 descartável — ver `docs/INVESTMENT_POLICY.md` para detalhes.
+
+## UX de Configurações/alocação (pós-Sprint 25) — precedência visível, presets e detecção de conflitos
+
+A LG INVEST sempre teve três formas independentes de configurar meta de
+alocação — alocação-alvo simples por classe (Sprint 17), regras
+detalhadas por dimensão (esta engine, Sprint 24) e a Investment Policy
+(Sprint 24) — mas nunca as três tinham sido mostradas juntas numa mesma
+tela, com a precedência entre elas explícita. Este ajuste (pós-Sprint 25)
+reorganiza a tela Configurações em torno dessas três camadas e adiciona
+um motor de exibição (não decisório) para deixar claro qual camada está
+valendo em cada dimensão.
+
+### Módulo `engines/target_allocation/precedence.py`
+
+Módulo puro (sem banco, rede ou Streamlit) com duas funções:
+
+- **`resolve_effective_limits(rules, policy)`** — calcula o limite
+  máximo *efetivo* por dimensão, replicando a MESMA precedência já usada
+  pelo Decision Engine 3.0 para bloquear aportes
+  (`engines/decision/eligibility.py::filter_eligible_v3`): **regra
+  detalhada > política geral > nenhum limite**. Esta função não decide
+  nada e não é chamada pelo Decision Engine — existe só para a tela de
+  Configurações exibir, de forma explícita, a mesma precedência que já
+  vale de verdade no bloqueio de aportes. Qualquer mudança na precedência
+  real de `eligibility.py` precisa ser espelhada aqui.
+- **`detect_conflicts(rules, simple_allocation)`** — detecta
+  inconsistências *informativas* entre as camadas. Nunca bloqueia nada e
+  nunca corrige nada sozinho, só avisa o usuário para ele decidir.
+
+Nem toda classe de ativo tem fallback de Investment Policy: hoje só
+`crypto` (via `max_crypto_weight`) e `fii` (via `target_fii_max`) têm um
+campo dedicado de limite máximo na política
+(`POLICY_CLASS_MAX_FIELDS`). As demais classes (`stock`, `etf`, `reit`,
+`bond`, `cash`) só têm limite se houver uma regra detalhada própria —
+sem ela, não existe limite nenhum (a engine nunca inventa um). Para a
+dimensão `asset`, o fallback é `max_asset_weight`: uma regra de ativo
+com `max_weight` sempre vence (a política nunca sobrescreve um limite de
+ticker específico); a política só aparece como uma linha "genérica"
+(`dimension_key = "(qualquer ativo sem regra própria)"`) para tickers
+sem regra própria. As dimensões `currency` e `country` não têm nenhum
+fallback de política — só aparecem se tiverem regra detalhada com
+`max_weight`.
+
+### Os 3 tipos de conflito detectados
+
+- **`simple_vs_detailed`** — a meta da alocação-alvo simples (Camada 1)
+  para uma classe diverge do `target_weight` da regra detalhada (Camada
+  2) para a mesma classe. A regra detalhada tem precedência; o aviso só
+  existe para o usuário perceber que a Camada 1 está "desatualizada" e
+  decidir se quer alinhar as duas.
+- **`sum_not_100`** — a soma dos `target_weight` das regras detalhadas
+  por classe não fecha 100%. Regras parciais são permitidas (é válido
+  configurar só algumas classes) — o aviso é só um lembrete para o caso
+  de a intenção ter sido cobrir a carteira inteira.
+- **`min_greater_than_target`** — numa mesma regra, `min_weight` maior
+  que `target_weight` (ver também a validação equivalente em
+  `TargetAllocationRuleService.set_rule`, abaixo).
+
+Todos os três tipos são só avisos: nenhum bloqueia salvar uma regra e
+nenhum corrige nada automaticamente.
+
+### `allocation_presets_service.py` — presets de alocação simples
+
+Cinco modelos prontos de alocação-alvo simples (Camada 1), cada um só um
+**ponto de partida comum**, nunca uma recomendação financeira:
+`conservador`, `moderado`, `crescimento_global`,
+`buy_and_hold_internacional` e `personalizado` (este último não aplica
+nada — sinaliza "configure manualmente"). Módulo só de dados + getters
+puros (`list_presets()`, `get_preset(key)`); os quatro presets com
+alocação são conferidos em tempo de import: cobrem só classes conhecidas
+(`ASSET_CLASSES`) e somam exatamente 100%.
+
+Aplicar um preset na UI sempre exige pré-visualização (tabela com a
+alocação do modelo) seguida de confirmação explícita numa etapa
+separada — nunca é aplicado com um único clique. Depois de aplicado, o
+usuário edita livremente cada classe pelo mesmo formulário que já
+existia para a alocação-alvo simples.
+
+### `allocation_overview_service.py` — visão consolidada para a UI
+
+`build_allocation_overview(db, portfolio_id)` só lê (regras detalhadas
+via `TargetAllocationRuleRepository`, Investment Policy via
+`InvestmentPolicyService.get_or_create`, alocação simples via
+`target_allocation_settings_service.get_target_allocation`), monta os
+dataclasses puros de `precedence.py` e devolve um `AllocationOverview`
+(schema Pydantic). Nunca grava nada e não é usado pelo Decision Engine —
+existe só para alimentar a tela Configurações.
+
+### Schemas novos em `schemas/target_allocation.py`
+
+- `EffectiveLimitView` — um limite máximo efetivo (`dimension_type`,
+  `dimension_key`, `max_weight`, `source` ∈ `EFFECTIVE_LIMIT_SOURCES`
+  (`"regra_detalhada"` / `"politica_geral"`), e
+  `overridden_policy_value` opcional — quando a regra detalhada venceu e
+  a política também tinha um valor para a mesma dimensão, o valor
+  sobrescrito fica visível).
+- `AllocationConflictView` — `kind` (∈ `CONFLICT_KINDS`) + `message`
+  pronta para exibição.
+- `AllocationOverview` — `effective_limits: list[EffectiveLimitView]` +
+  `conflicts: list[AllocationConflictView]`.
+
+### Validação nova em `TargetAllocationRuleService.set_rule`
+
+Além das validações já existentes (`min_weight <= max_weight`,
+`target_weight <= max_weight`, pesos não negativos, `dimension_type`
+válido), `set_rule` agora também rejeita `min_weight > target_weight`
+("o mínimo aceitável não pode ficar acima do alvo desejado") — faltava
+essa checagem antes; só `min > max` e `target > max` eram bloqueados.
+
+### Tela Configurações — nova organização
+
+`frontend/streamlit_app/pages_impl/configuracoes.py` foi reorganizada em
+torno das três camadas, nesta ordem:
+
+1. **Introdução** ("Como funciona a alocação-alvo") — explica as 3
+   camadas e a ordem de precedência ANTES de qualquer formulário, com o
+   aviso fixo de que estas regras nunca geram venda automática (só
+   pausam novos aportes na dimensão acima do alvo/máximo).
+2. **Camada 1 — Alocação-alvo simples por classe**, agora com o
+   expander "Aplicar um modelo pronto (preset)": seleção de preset,
+   pré-visualização em tabela e confirmação em duas etapas
+   (`preview_preset` → `confirm_preset`) antes de sobrescrever a meta
+   atual.
+3. **Camada 3 — Política de investimento geral** (mantida, com o texto
+   de fallback explícito nos campos `max_asset_weight`,
+   `max_crypto_weight` e `target_fii_max`).
+4. **Camada 2 — Regras detalhadas**, agora com:
+   - lista de regras cadastradas **agrupada por dimensão** (Classe /
+     Moeda / País / Ativo), uma tabela por grupo;
+   - botão "Editar" por linha, que pré-preenche o formulário
+     (`_prefill_rule_form`) sem precisar remover e recriar a regra
+     (a escrita já era upsert);
+   - **cadastro rápido**: botões de atalho para dimensões comuns — USD,
+     BRL, FIIs, ETFs, BTC (`asset=BTC-USD`), Tesouro (`class=bond`), VOO
+     e QQQ — que só preenchem dimensão/chave no formulário; o usuário
+     ainda define os pesos e clica em "Salvar regra" (nunca salva
+     sozinho).
+5. **"Limite efetivo por dimensão e conflitos"** (nova seção, via
+   `_render_effective_limits_and_conflicts` → `build_allocation_overview`):
+   tabela com o limite máximo efetivo por dimensão (origem e, quando
+   aplicável, o valor de política sobrescrito) e a lista de conflitos
+   detectados entre as camadas. Section puramente informativa — não
+   corrige nada sozinha.
+
+O aviso "não gera venda automática" (`_NEVER_SELLS_DISCLAIMER`) é
+repetido em toda seção que lida com alocação-alvo, em vez de aparecer
+uma única vez — decisão deliberada para nunca deixar implícito.
