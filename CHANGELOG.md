@@ -3,6 +3,28 @@
 Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
+## [Unreleased] - v1.1 Premium Web App — Fase 0 e Fase 1 (início da migração)
+
+### Contexto
+Início da migração da LG INVEST de Streamlit para um app web moderno (Next.js + FastAPI + Supabase), pedida explicitamente pelo usuário, na branch `feature/v1.1-premium-web-app` — `main`/v1.0.0 não é alterada. Antes de iniciar, corrigido um problema encontrado na auditoria: a tag `v1.0.0` apontava para um commit de Sprint 25 (`08626ed`), sem conter nenhum trabalho das Sprints 26-31 (Valuation Engine 2.0, Trap Detection, Data Coverage, Post-Allocation Constraints, Design System, documentação de release) — 136 arquivos modificados e 76 novos ficaram sem commit ao longo de várias sessões. Commitado tudo em `eac71d5` e a tag `v1.0.0` foi movida para apontar corretamente, antes de abrir a branch de migração.
+
+### Adicionado
+- `docs/WEB_APP_ARCHITECTURE.md` — decisão de arquitetura: frontend (Next.js) na Vercel, backend (FastAPI) em serviço long-running fora da Vercel (Render/Fly/Railway — Playwright do Dividendos.me não roda em serverless), banco Supabase Postgres (SQLAlchemy já era agnóstico a banco desde a Sprint 20), estrutura de pastas (`backend/app/api/` + `frontend-next/`, Streamlit legado mantido até o Next.js cobrir o fluxo principal), riscos.
+- `docs/V1_1_MIGRATION_PLAN.md` — plano por 10 fases (auditoria → protótipo → API Dashboard → Aporte → demais telas → Dividendos.me → robustez → deploy → QA final), estimativas relativas, riscos de processo.
+- `docs/STREAMLIT_TO_NEXTJS_MIGRATION.md` — mapa das 10 telas Streamlit, os services/engines que cada uma consome hoje, e o endpoint novo planejado para cada uma.
+- `docs/API_CONTRACT.md` — contrato inicial de ~25 endpoints REST, todos como camada fina sobre os `services/*` já existentes (nenhuma regra nova).
+- `docs/SECURITY_NOTES.md` — regras gerais de segurança da API nova (credenciais nunca persistidas/logadas/retornadas, CORS restrito, rate limiting, nota explícita sobre a v1.1 continuar sem autenticação multiusuário).
+- `docs/DIVIDENDOS_ME_FRONT_SYNC.md` — novo fluxo de sincronização via modal (credenciais digitadas a cada sessão, nunca persistidas); descoberta da auditoria de que `DividendosMeClient` já aceita credenciais por parâmetro (não precisa mudar o client, só a origem das credenciais); decisão de reenviar credenciais a cada etapa em vez de cache temporário; avaliação de alternativas (upload manual, sync local helper, browser extension) mantida como possibilidade futura.
+- `frontend-next/` (novo) — protótipo Next.js/TypeScript/Tailwind/shadcn com Dashboard premium usando dados mockados (sem integração com API ainda), para validação visual antes de qualquer integração real.
+
+### Corrigido
+- Tag `v1.0.0` movida de `08626ed` (Sprint 25) para `eac71d5` (Sprint 31 completa) — ver Contexto acima.
+
+### Deixado de fora (fases seguintes, após validação do visual)
+- Nenhuma integração real com a API — Dashboard do Next.js usa dados mockados de propósito nesta rodada.
+- Nenhuma mudança em `backend/` além da futura camada `api/` (ainda não criada) — engines, services e Streamlit legado inalterados.
+- Autenticação multiusuário — adiada para v1.2 por decisão explícita do usuário.
+
 ## [1.0.0] - LG INVEST Stable Local App (Sprint 31)
 
 ### Contexto
