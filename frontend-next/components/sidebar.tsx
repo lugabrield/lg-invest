@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   BarChart3,
   BookOpen,
@@ -15,13 +17,15 @@ import { cn } from "@/lib/utils";
 
 // Mesmos 3 grupos já validados no Streamlit (Sprint 30): Principal,
 // Análise, Operação — mantidos aqui para não reaprender a navegação.
+// Telas ainda não migradas para o Next.js ficam com `href: "#"` até sua
+// própria fase chegar (Fase 3 só entrega Dashboard + Aporte).
 const NAV_GROUPS = [
   {
     label: "Principal",
     items: [
-      { label: "Dashboard", icon: LayoutDashboard, href: "#", active: true },
+      { label: "Dashboard", icon: LayoutDashboard, href: "/" },
       { label: "Carteira", icon: Wallet, href: "#" },
-      { label: "Aporte", icon: BarChart3, href: "#" },
+      { label: "Aporte", icon: BarChart3, href: "/aporte" },
     ],
   },
   {
@@ -44,6 +48,8 @@ const NAV_GROUPS = [
 ];
 
 export function Sidebar() {
+  const pathname = usePathname();
+
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border-soft bg-surface/60 backdrop-blur-xl lg:flex">
       <div className="flex h-16 items-center gap-2.5 border-b border-border-soft px-5">
@@ -63,21 +69,24 @@ export function Sidebar() {
               {group.label}
             </div>
             <div className="space-y-0.5">
-              {group.items.map((item) => (
-                <a
-                  key={item.label}
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
-                    item.active
-                      ? "bg-gradient-to-r from-primary/15 to-transparent text-text-primary shadow-[inset_1px_0_0_0_theme(colors.primary.DEFAULT)]"
-                      : "text-text-muted hover:bg-surface-hover hover:text-text-primary",
-                  )}
-                >
-                  <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                  <span className="truncate">{item.label}</span>
-                </a>
-              ))}
+              {group.items.map((item) => {
+                const active = item.href !== "#" && pathname === item.href;
+                return (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
+                      active
+                        ? "bg-gradient-to-r from-primary/15 to-transparent text-text-primary shadow-[inset_1px_0_0_0_theme(colors.primary.DEFAULT)]"
+                        : "text-text-muted hover:bg-surface-hover hover:text-text-primary",
+                    )}
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                    <span className="truncate">{item.label}</span>
+                  </Link>
+                );
+              })}
             </div>
           </div>
         ))}

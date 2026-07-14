@@ -154,3 +154,152 @@ export async function fetchDashboard(portfolioId = 1): Promise<DashboardBundle> 
 
   return response.json();
 }
+
+// --- Aporte (v1.1, Fase 3) — espelha 1:1 backend/app/schemas/recommendation_result.py,
+// backend/app/schemas/allocation_projection.py e backend/app/schemas/aporte_bundle.py.
+// Mesma regra do Dashboard: Decimal sempre como string, conversão para
+// número só na apresentação (`lib/adapt-aporte.ts`).
+
+export interface ScoreFactor {
+  label: string;
+  weight: string | null;
+  value: string;
+  contribution: string;
+}
+
+export interface RecommendationItem {
+  ticker: string;
+  amount: string;
+  weight: string; // fração do aporte
+  buy_score: string;
+  lg_score: string;
+  conviction_score: string | null;
+  item_confidence: string | null;
+  reasons: string[];
+  score_breakdown: ScoreFactor[];
+  is_new_from_watchlist: boolean;
+  watchlist_reason: string | null;
+}
+
+export interface CappedDimensionResult {
+  dimension_type: string;
+  dimension_key: string;
+  label: string;
+  weight_before: string;
+  weight_after: string;
+  max_weight: string;
+  source: string;
+}
+
+export interface IgnoredItem {
+  ticker: string;
+  reason: string;
+  block_source: string | null;
+}
+
+export interface DecisionAudit {
+  contribution_amount: string;
+  eligible_tickers: string[];
+  blocked_tickers: string[];
+  model_version: string;
+  weights: Record<string, number>;
+}
+
+export interface RecommendationResult {
+  contribution_amount: string;
+  allocated_amount: string;
+  items: RecommendationItem[];
+  ignored: IgnoredItem[];
+  alerts: string[];
+  confidence: string;
+  confidence_label: string;
+  explanation: string;
+  audit: DecisionAudit;
+  capped_dimensions: CappedDimensionResult[];
+}
+
+export interface WeightComparison {
+  label: string;
+  weight_before: string;
+  weight_after: string;
+}
+
+export interface AllocationProjection {
+  contribution_amount: string;
+  total_before_brl: string;
+  total_after_brl: string;
+  by_group: WeightComparison[];
+  by_currency: WeightComparison[];
+  concentration_hhi_before: string;
+  concentration_hhi_after: string;
+  international_weight_before: string;
+  international_weight_after: string;
+}
+
+export interface AporteBundle {
+  result: RecommendationResult;
+  projection: AllocationProjection | null;
+}
+
+export interface AssetSummary {
+  ticker: string;
+  name: string;
+  asset_class: string;
+}
+
+export type EngineVersion = "v1" | "v2" | "v3";
+
+export interface AporteRequestPayload {
+  amount: string;
+  blocked?: string[];
+  engine_version?: EngineVersion;
+  persist?: boolean;
+  allow_watchlist_candidates?: boolean;
+}
+
+export async function fetchAssets(): Promise<AssetSummary[]> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/assets`, { cache: "no-store" });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+  if (!response.ok) {
+    throw new ApiError(response.statusText, response.status);
+  }
+  return response.json();
+}
+
+export async function simulateAporte(
+  payload: AporteRequestPayload,
+  portfolioId = 1,
+): Promise<AporteBundle> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/aporte?portfolio_id=${portfolioId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+
+  return response.json();
+}

@@ -4,6 +4,29 @@ Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
 
+## [Unreleased] - v1.1 Premium Web App — Fase 3 (Aporte v3 real no Next.js)
+
+### Contexto
+Autorizado pelo usuário ("pode avançar tudo") logo após validar a Fase 2 rodando localmente. Leva a segunda tela do Next.js ao ar: Aporte v3, com o mesmo `DecisionService` (v1/v2/v3, inalterado) e `allocation_projection_service` ("como a carteira ficaria depois", inalterado) que a tela Streamlit já usava — nenhuma regra de decisão nova, nenhum cálculo duplicado no frontend.
+
+### Adicionado
+- `backend/app/schemas/aporte_bundle.py` — `AporteRequest` (valor, bloqueados, versão do motor, persistência, watchlist — mesmos campos que `pages_impl/aporte.py` já coletava), `AporteBundle` (embrulha `RecommendationResult` + `AllocationProjection`, ambos já `pydantic.BaseModel` — sem adaptação nenhuma) e `AssetSummary`.
+- `backend/app/api/routes/aporte.py` — `POST /api/aporte` (chama `DecisionService.recommend`/`recommend_v2`/`recommend_v3` pela versão pedida, projeta antes/depois só quando `result.items` não está vazio) e `GET /api/assets` (universo de ativos, usado só para popular o seletor de bloqueados).
+- `backend/tests/unit/test_api_aporte.py` (8 testes) — contrato/wiring: as 3 versões do motor, bloqueio manual propagado como `block_source`, `persist=true/false` grava/não grava `Recommendation`, projeção nula quando nada é alocado, `engine_version` inválido devolve 422, universo de ativos.
+- `frontend-next/lib/api.ts` — tipos `RecommendationItem`, `IgnoredItem`, `CappedDimensionResult`, `RecommendationResult`, `AllocationProjection`, `AporteBundle`, `AssetSummary` (espelham 1:1 os schemas Pydantic) + `fetchAssets()` e `simulateAporte()`.
+- `frontend-next/lib/adapt-aporte.ts` — adaptador puro: rótulos de `block_source`/dimensão (mesmo vocabulário de `_BLOCK_SOURCE_LABELS`/`DIMENSION_TYPE_LABELS` do Streamlit), badges de score/confiança, resumo da projeção antes/depois.
+- `frontend-next/lib/format.ts` (novo) — `formatBRL`/`formatPct` extraídos de `adapt-dashboard.ts` para não duplicar a mesma formatação em `adapt-aporte.ts`.
+- `frontend-next/components/aporte-form.tsx` — formulário (valor, chips de ativos bloqueados, seletor de motor v1/v2/v3, checkboxes de persistência/watchlist) + apresentação do resultado (cards de recomendação reaproveitando `RecommendationCard` da Fase 1, detalhes técnicos em `<details>`, tabela de ativos evitados, tabela de limites pós-aporte atingidos, projeção antes/depois).
+- `frontend-next/components/before-after-bar-chart.tsx` — gráfico de barras (recharts) do peso por classe antes x depois, mesma leitura do `_before_after_chart` (Plotly) do Streamlit.
+- `frontend-next/app/aporte/page.tsx` — server component: busca `GET /api/assets` no carregamento, delega a simulação (disparada por clique) ao `AporteForm` (client component).
+- `frontend-next/components/sidebar.tsx` — navegação real (Next `Link` + `usePathname`) para Dashboard (`/`) e Aporte (`/aporte`); as demais telas continuam com `href="#"` até sua fase chegar.
+- `frontend-next/components/topbar.tsx` — botão "Simular aporte" agora é um link para `/aporte`; novo prop `showActions` (a própria tela Aporte não mostra o CTA para si mesma).
+
+### Deixado de fora (fases seguintes)
+- Carteira, Inteligência, Ativos, Radar, Simulação, Journal, Configurações, Dividendos.me continuam só no Streamlit.
+- Nenhuma mudança em `backend/app/engines` ou `backend/app/services`.
+- `npm run build` não pôde ser verificado de ponta a ponta neste sandbox (proxy bloqueia o fetch da fonte Inter no Google Fonts, HTTP 403) — `typecheck` e `lint` rodaram limpos; build de produção deve ser conferido localmente.
+
 ## [Unreleased] - v1.1 Premium Web App — Fase 2 (API real + Dashboard conectado)
 
 ### Contexto

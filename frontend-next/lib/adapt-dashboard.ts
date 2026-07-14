@@ -12,14 +12,7 @@ import type {
   TopPositionMock,
 } from "@/lib/mock/dashboard";
 import type { DashboardBundle, DiagnosticInsight } from "@/lib/api";
-
-const currencyFormatter = new Intl.NumberFormat("pt-BR", {
-  style: "currency",
-  currency: "BRL",
-  maximumFractionDigits: 2,
-});
-
-const pctFormatter = (fraction: number) => `${(fraction * 100).toFixed(1)}%`.replace(".", ",");
+import { formatBRL, formatPct } from "@/lib/format";
 
 const GROUP_COLORS: Record<string, string> = {
   "Ações BR": "#8B5CF6",
@@ -59,26 +52,26 @@ export function adaptKpis(bundle: DashboardBundle): KpiMock[] {
   return [
     {
       label: "Patrimônio total",
-      value: currencyFormatter.format(totalConverted),
+      value: formatBRL(totalConverted),
       status: "positive",
       icon: "wallet",
     },
     {
       label: "Rentabilidade total",
-      value: totalReturn !== null ? `${totalReturn >= 0 ? "+" : ""}${pctFormatter(totalReturn)}` : "—",
+      value: totalReturn !== null ? `${totalReturn >= 0 ? "+" : ""}${formatPct(totalReturn)}` : "—",
       delta: "desde o início",
       status: totalReturn === null ? "neutral" : totalReturn >= 0 ? "positive" : "critical",
       icon: "trending-up",
     },
     {
       label: "Exposição internacional",
-      value: pctFormatter(internationalWeight),
+      value: formatPct(internationalWeight),
       status: "neutral",
       icon: "globe",
     },
     {
       label: "Maior posição",
-      value: largest ? `${largest.ticker} · ${pctFormatter(Number(largest.weight))}` : "—",
+      value: largest ? `${largest.ticker} · ${formatPct(Number(largest.weight))}` : "—",
       status: "attention",
       icon: "pie-chart",
     },
