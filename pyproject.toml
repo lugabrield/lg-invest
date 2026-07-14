@@ -20,6 +20,8 @@ dependencies = [
     "python-dotenv>=1.0,<2.0",
     "psycopg2-binary>=2.9,<3.0",
     "playwright>=1.44,<2.0",
+    "fastapi>=0.111,<1.0",
+    "uvicorn[standard]>=0.30,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -55,7 +57,11 @@ extend-exclude = ["database/migrations/versions"]
 [tool.ruff.lint]
 # E/F: pyflakes+pycodestyle | I: isort | UP: pyupgrade | B: bugbear
 select = ["E", "F", "I", "UP", "B"]
-ignore = ["E501"]  # line-length tratado pelo black
+# E501: line-length tratado pelo black.
+# B008: `Depends(...)` como default de argumento é o padrão oficial do
+# FastAPI (v1.1, Fase 2 — ver backend/app/api/routes/*.py); não é o
+# "function call as default" perigoso que a regra existe para pegar.
+ignore = ["E501", "B008"]
 
 [tool.mypy]
 python_version = "3.11"

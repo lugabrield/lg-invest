@@ -25,12 +25,21 @@ class Settings(BaseSettings):
     # e sem chave; desligar aqui pula direto para o fallback Yahoo/manual.
     bcb_fx_enabled: bool = True
 
+    # API HTTP (v1.1, Fase 2): origem(ns) do frontend Next.js autorizadas a
+    # chamar a API via CORS. Em produção, restringir ao domínio real da
+    # Vercel — nunca usar "*" com credenciais. Ver docs/SECURITY_NOTES.md.
+    api_cors_origins: str = "http://localhost:3000"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
+
+    @property
+    def api_cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.api_cors_origins.split(",") if origin.strip()]
 
 
 # Instância única reutilizável pela aplicação.

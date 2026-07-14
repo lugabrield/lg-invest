@@ -26,3 +26,9 @@ psycopg2-binary>=2.9,<3.0
 # Streamlit Cloud o pacote pode estar ausente/instável de propósito: a
 # tela detecta isso e desabilita os botões de sincronização automaticamente.
 playwright>=1.44,<2.0
+
+# API HTTP (v1.1, Fase 2 — ver docs/API_CONTRACT.md e
+# docs/WEB_APP_ARCHITECTURE.md). Camada fina sobre os services
+# existentes, consumida pelo frontend Next.js (frontend-next/).
+fastapi>=0.111,<1.0
+uvicorn[standard]>=0.30,<1.0

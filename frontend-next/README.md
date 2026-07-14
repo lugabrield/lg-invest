@@ -5,20 +5,32 @@ Streamlit (`frontend/streamlit_app/`). Ver `docs/V1_1_MIGRATION_PLAN.md`
 e `docs/WEB_APP_ARCHITECTURE.md` na raiz do projeto para o plano
 completo e as decisões de arquitetura.
 
-## Estado atual (Fase 1)
+## Estado atual (Fase 2)
 
-Só o Dashboard, com **dados mockados** (`lib/mock/dashboard.ts`) — sem
-integração com nenhuma API ainda. Objetivo desta fase é validar o
-visual antes de conectar dado real (Fase 2).
+O Dashboard consome dado real de `GET /api/dashboard` (`lib/api.ts` +
+`lib/adapt-dashboard.ts`) — nenhum cálculo acontece aqui, só
+formatação do que a API já devolve pronto. `lib/mock/dashboard.ts`
+continua existindo só pelos tipos de apresentação (`StatusKind`,
+`KpiMock` etc.) que os componentes usam; os arrays de dado mockado não
+são mais importados em `app/page.tsx`.
 
 ## Rodar localmente
 
+Precisa do backend rodando também (ver raiz do projeto):
+
 ```bash
+# terminal 1 — API
+uvicorn backend.app.api.app:app --reload --port 8000
+
+# terminal 2 — frontend
+cd frontend-next
 npm install
 npm run dev
 ```
 
-Abre em `http://localhost:3000`.
+Abre em `http://localhost:3000`. Se a API não estiver no ar, o
+Dashboard mostra um `ErrorState` (nunca quebra a página nem mostra
+stack trace).
 
 ## Scripts
 
@@ -39,8 +51,10 @@ frontend-next/
 │                          #   DonutChartCard, ProgressBar, AssetTable,
 │                          #   StatusBadge, AlertCard, EmptyState, etc.)
 ├── lib/
+│   ├── api.ts             # cliente HTTP da API (tipos = schemas Pydantic)
+│   ├── adapt-dashboard.ts # formata DashboardBundle para os componentes
 │   ├── utils.ts           # cn() — merge de classes Tailwind
-│   └── mock/               # dados mockados (só na Fase 1)
+│   └── mock/               # só tipos de apresentação + dado de referência
 ```
 
 ## Regras (ver docs/API_CONTRACT.md e docs/SECURITY_NOTES.md)

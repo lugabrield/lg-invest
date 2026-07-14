@@ -4,6 +4,31 @@ Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
 
+## [Unreleased] - v1.1 Premium Web App — Fase 2 (API real + Dashboard conectado)
+
+### Contexto
+Autorizado pelo usuário após validar o visual da Fase 1 ("ta lindo, pode seguir"). Liga o Dashboard do Next.js em dado real pela primeira vez, via um FastAPI novo (`backend/app/api/`) que só reaproveita os services já existentes — nenhuma regra de negócio nova, nenhum cálculo duplicado no frontend.
+
+### Adicionado
+- `backend/app/api/app.py` — app FastAPI (CORS restrito a `NEXT_PUBLIC_API_URL`/`localhost:3000` via `settings.api_cors_origins`), `backend/app/api/deps.py` (sessão de banco por request + `portfolio_id` default 1).
+- `backend/app/api/routes/dashboard.py` — `GET /api/dashboard`: mesma composição de 7 peças que `cache.py::cached_dashboard_bundle` já fazia para o Streamlit (view, diagnostics, intelligence, data_quality, health, risk, data_refresh_status), sem cache próprio ainda.
+- `backend/app/api/routes/system.py` — `GET /api/system/status` (healthcheck: ambiente + conectividade com o banco, sem dado sensível).
+- `backend/app/schemas/dashboard_bundle.py` — `DashboardBundle`, o wrapper Pydantic do payload acima.
+- `backend/tests/unit/test_api_dashboard.py` (7 testes) — contrato/serialização do endpoint (Decimal como string, os 7 campos presentes, portfolio vazio, default de `portfolio_id`, healthcheck), nunca recalculando regra de negócio.
+- `frontend-next/lib/api.ts` — cliente HTTP tipado (`fetchDashboard`), com `ApiError` para falha de conexão/status HTTP tratada sem stack trace.
+- `frontend-next/lib/adapt-dashboard.ts` — adaptador puro API → formato de apresentação (`KpiMock`, `AllocationSliceMock` etc.) que os componentes da Fase 1 já esperavam — nenhum componente precisou ser redesenhado.
+- `app/page.tsx` agora é um server component assíncrono: busca `GET /api/dashboard` a cada carregamento (`cache: "no-store"`), mostra `ErrorState` se a API estiver fora do ar e `EmptyState` se a carteira estiver vazia.
+
+### Corrigido
+- `requirements.txt`/`pyproject.toml`: adicionados `fastapi` e `uvicorn[standard]`.
+- `pyproject.toml`: `B008` (bugbear) adicionado ao `ignore` do ruff — `Depends(...)` como default de argumento é o padrão oficial do FastAPI, não o anti-padrão que a regra existe para pegar.
+- Achado durante os testes: `sqlite:///:memory:` + `FastAPI TestClient` (que roda a rota numa worker thread) + um `commit()` no meio do request (`InvestmentPolicyRepository.create()`) faz o pool devolver uma conexão nova e vazia depois do commit — sintoma "no such table" mesmo com `create_all()` já rodado. Corrigido nos testes com `poolclass=StaticPool`; não afeta produção (Postgres/SQLite em arquivo não têm esse problema).
+
+### Deixado de fora (fases seguintes)
+- Todas as outras telas (Carteira, Aporte, Inteligência, Ativos, Radar, Simulação, Configurações, Dividendos.me) continuam só no Streamlit — Fase 4 em diante.
+- Nenhuma mudança em `backend/app/engines` ou `backend/app/services` — só a camada `api/` nova por cima.
+- Cache no endpoint (o Streamlit tem TTL de 5 min via `st.cache_data`; a API ainda não tem equivalente) — decisão de performance adiada.
+
 ## [Unreleased] - v1.1 Premium Web App — Fase 0 e Fase 1 (início da migração)
 
 ### Contexto
