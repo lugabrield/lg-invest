@@ -4,6 +4,27 @@ Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
 
+## [Unreleased] - v1.1 Premium Web App — Fase 8 (Simulação real no Next.js)
+
+### Contexto
+Autorizado pelo usuário ("sim") logo após validar a Fase 7 (Radar) rodando localmente. Leva a sétima tela do Next.js ao ar: Simulação. Consome `SimulationService.run_portfolio_simulation()` (Monte Carlo Simulation Engine, Sprint 24), exatamente como `pages_impl/simulacao.py` já fazia — resolve o valor atual da carteira e os pesos por classe, lê as premissas de retorno/volatilidade por classe (editáveis em Configurações, ainda só no Streamlit) e roda a simulação pura, sem persistir nada no banco. Assim como o Streamlit (`st.button("Rodar simulação")`), a tela nunca dispara a simulação sozinha no carregamento — só quando o usuário clica em "Rodar simulação", porque o Monte Carlo é caro e não é cacheável entre requests.
+
+### Adicionado
+- `backend/app/schemas/simulation.py` — novo `SimulationRunRequest` (payload da rota: `monthly_contribution` >= 0, `horizon_years` entre 1 e 100, `num_simulations` entre 100 e 20000, `reproducible: bool`), mesmos limites do `st.number_input` do Streamlit. `SimulationResultView` já era Pydantic 1:1 (`from_attributes=True`) e não precisou de nenhuma mudança.
+- `backend/app/api/routes/simulacao.py` — `POST /api/simulacao`: valida o payload, chama `SimulationService.run_portfolio_simulation()` com a mesma seed fixa 42 do Streamlit quando `reproducible=true` (nunca uma seed arbitrária vinda do cliente), devolve `SimulationResultView` direto (sem adaptador). 422 se o `SimulationService` levantar `ValueError`.
+- `backend/tests/unit/test_api_simulacao.py` (8 testes) — contrato/wiring: defaults iguais aos do Streamlit quando o payload vem vazio, resultado correto para carteira vazia (mesma regra de `test_run_portfolio_simulation_handles_empty_portfolio`: sem posições, só acumula os aportes futuros, sem inventar componente de mercado), semente fixa reproduz o mesmo resultado em duas chamadas, 422 para horizonte fora de 1-100, nº de simulações fora de 100-20000 e aporte mensal negativo. Isola `data/app_settings.json` via `monkeypatch` (mesmo padrão de `test_simulation_service.py`) para nunca tocar o arquivo real de desenvolvimento.
+- `frontend-next/lib/api.ts` — `SimulationResultView` e `SimulationRunPayload` (espelham 1:1 o schema Pydantic, Decimal sempre como string) + `runSimulation()`.
+- `frontend-next/lib/adapt-simulacao.ts` — `orderedPercentiles()` (p10→p90 com rótulos em pt-BR), `lossStatus()` (mesmos limiares do `loss_status` do Streamlit: >=30% crítico, >=10% atenção, senão positivo), `buildMetricCards()` (4 cards: valor inicial, total aportado, mediana projetada, probabilidade de perda) e `buildPercentileRangeDatum()`.
+- `frontend-next/components/simulation-percentile-chart.tsx` — gráfico de faixa p10–p90 (clara) com p25–p75 destacado (cheio) e mediana (p50) marcada, mesma leitura de `chart_simulation_percentiles` (Plotly) trocando para Recharts (barra horizontal empilhada, já que o Recharts não tem equivalente direto ao `base` do Plotly).
+- `frontend-next/components/simulacao-form.tsx` (client) — formulário (aporte mensal, horizonte, nº de simulações, semente fixa) + resultado: disclaimer fixo "Isto não é uma previsão", 4 metric cards, gráfico de percentis, tabela de percentis, premissas/simplificações usadas (expansível) e warnings — nenhum cálculo aqui, só apresenta o que `POST /api/simulacao` devolve.
+- `frontend-next/app/simulacao/page.tsx` — página composta só pelo `SimulacaoForm` (sem GET no carregamento, mesmo gate do botão do Streamlit).
+- `frontend-next/components/sidebar.tsx` — item "Simulação" passa de `href="#"` para `href="/simulacao"`.
+
+### Deixado de fora (fases seguintes)
+- Journal, Configurações, Dividendos.me continuam só no Streamlit — inclusive a edição das premissas de retorno/volatilidade por classe, que só é possível hoje na tela Configurações do Streamlit (a rota nova só lê as premissas já configuradas).
+- Nenhuma mudança em `backend/app/engines` ou `backend/app/services`.
+- `npm run build` não pôde ser verificado de ponta a ponta neste sandbox (proxy bloqueia o fetch da fonte Inter no Google Fonts) — `typecheck` e `lint` rodaram limpos; build de produção deve ser conferido localmente.
+
 ## [Unreleased] - v1.1 Premium Web App — Fase 7 (Radar/Watchlist real no Next.js)
 
 ### Contexto

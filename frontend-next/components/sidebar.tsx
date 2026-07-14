@@ -18,8 +18,8 @@ import { cn } from "@/lib/utils";
 // Mesmos 3 grupos já validados no Streamlit (Sprint 30): Principal,
 // Análise, Operação — mantidos aqui para não reaprender a navegação.
 // Telas ainda não migradas para o Next.js ficam com `href: "#"` até sua
-// própria fase chegar (Fase 7 entrega Dashboard + Aporte + Carteira +
-// Inteligência + Ativos + Radar).
+// própria fase chegar (Fase 8 entrega Dashboard + Aporte + Carteira +
+// Inteligência + Ativos + Radar + Simulação).
 const NAV_GROUPS = [
   {
     label: "Principal",
@@ -35,7 +35,7 @@ const NAV_GROUPS = [
       { label: "Inteligência", icon: Sparkles, href: "/inteligencia" },
       { label: "Ativos", icon: LineChart, href: "/ativos" },
       { label: "Radar", icon: Compass, href: "/radar" },
-      { label: "Simulação", icon: BarChart3, href: "#" },
+      { label: "Simulação", icon: BarChart3, href: "/simulacao" },
       { label: "Journal", icon: BookOpen, href: "#" },
     ],
   },

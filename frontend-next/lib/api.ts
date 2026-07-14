@@ -1153,3 +1153,62 @@ export async function fetchRadarEvaluation(portfolioId = 1): Promise<RadarEvalua
   }
   return _handleJsonResponse<RadarEvaluation>(response);
 }
+
+// --- Simulação (v1.1, Fase 8) — espelha 1:1
+// backend/app/schemas/simulation.py (`SimulationResultView`). O Monte
+// Carlo Simulation Engine é puro e não persiste nada no banco — cada
+// chamada aqui é uma nova projeção sob demanda. Isto nunca é uma
+// previsão real de mercado, sempre uma projeção probabilística (ver
+// docs/SIMULATION_ENGINE.md); nenhum percentil/probabilidade é
+// recalculado no frontend.
+
+export interface SimulationResultView {
+  model_version: string;
+  initial_value: string;
+  monthly_contribution: string;
+  horizon_years: number;
+  num_simulations: number;
+  total_contributed: string;
+  percentiles: Record<string, string>;
+  median_final_value: string;
+  probability_of_loss: string; // fração 0..1
+  reasons: string[];
+  warnings: string[];
+}
+
+export interface SimulationRunPayload {
+  monthly_contribution: string;
+  horizon_years: number;
+  num_simulations: number;
+  reproducible: boolean;
+}
+
+export async function runSimulation(
+  payload: SimulationRunPayload,
+  portfolioId = 1,
+): Promise<SimulationResultView> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/simulacao?portfolio_id=${portfolioId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+  return response.json();
+}
