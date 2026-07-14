@@ -480,3 +480,473 @@ export async function fetchIntelligence(portfolioId = 1): Promise<IntelligenceBu
 
   return response.json();
 }
+
+// --- Ativos (v1.1, Fase 6) — espelha 1:1 backend/app/schemas/asset_row.py,
+// asset_detail.py, asset_actions.py e os schemas de cada engine (LG
+// Score, Conviction Score v2, Data Quality, Fundamentos, Valuation v1/v2,
+// Análise de Renda Imobiliária, Adequação à Política, Trap Detection,
+// Cobertura de Dados). Nenhum cálculo novo — tudo já vem pronto da API.
+
+export interface AssetRowView {
+  ticker: string;
+  name: string;
+  asset_class: string;
+  country: string;
+  currency: string;
+  sector: string | null;
+  price: string | null;
+  price_status: "automatic" | "manual" | "missing";
+  is_manual: boolean;
+  updated_at: string | null;
+}
+
+export interface PillarResult {
+  name: string;
+  score: string; // 0..100
+  confidence: string; // fração 0..1
+  reasons: string[];
+}
+
+export interface LGScoreResult {
+  ticker: string;
+  lg_score: string;
+  quality: string;
+  valuation: string;
+  growth: string;
+  risk: string;
+  allocation: string;
+  confidence: string;
+  confidence_label: string;
+  classification: string;
+  model_version: string;
+  explanation: PillarResult[];
+}
+
+export interface ConvictionScoreResult {
+  ticker: string;
+  conviction_score: string; // 0..100
+  quality: string;
+  valuation: string;
+  growth: string;
+  risk: string;
+  capital_reinvestment: string;
+  confidence: string; // 0..1
+  confidence_label: string;
+  classification: string;
+  recommendation_hint: string;
+  model_version: string;
+  explanation: ConvictionPillarResult[];
+}
+
+export interface AssetDataQuality {
+  ticker: string;
+  asset_class: string;
+  price_status: string;
+  fundamentals_status: string;
+  fundamentals_fields_available: number;
+  fundamentals_fields_total: number;
+  valuation_status: string;
+  score_confidence: string;
+  issues: string[];
+}
+
+export interface FundamentalSnapshotResult {
+  ticker: string;
+  period_end: string;
+  source: string;
+  collected_at: string;
+  roe: string | null;
+  roa: string | null;
+  net_margin: string | null;
+  ebitda_margin: string | null;
+  revenue: string | null;
+  net_income: string | null;
+  ebitda: string | null;
+  ebit: string | null;
+  free_cash_flow: string | null;
+  net_debt: string | null;
+  debt_to_ebitda: string | null;
+  pe_ratio: string | null;
+  pb_ratio: string | null;
+  ev_ebitda: string | null;
+  dividend_yield: string | null;
+  payout_ratio: string | null;
+  eps: string | null;
+  revenue_per_share: string | null;
+  beta: string | null;
+  market_cap: string | null;
+  enterprise_value: string | null;
+  forward_pe: string | null;
+  operating_margin: string | null;
+  total_debt: string | null;
+  total_cash: string | null;
+  operating_cash_flow: string | null;
+  gross_profit: string | null;
+  shares_outstanding: string | null;
+  total_equity: string | null;
+  roic: string | null;
+  interest_coverage: string | null;
+}
+
+export interface FundamentalsAnalysisResult {
+  ticker: string;
+  periods_used: number;
+  revenue_cagr: string | null;
+  revenue_cagr_reason: string | null;
+  net_income_cagr: string | null;
+  net_income_cagr_reason: string | null;
+  ebitda_cagr: string | null;
+  ebitda_cagr_reason: string | null;
+  fcf_cagr: string | null;
+  fcf_cagr_reason: string | null;
+  margin_trend: string;
+  margin_trend_reason: string | null;
+  confidence: string;
+  reason: string | null;
+}
+
+export interface MetricVerdict {
+  field: string;
+  label: string;
+  value: string | null;
+  verdict: string;
+  reason: string | null;
+}
+
+export interface ValuationResult {
+  ticker: string;
+  asset_class: string;
+  classification: string;
+  metrics: MetricVerdict[];
+  confidence: string;
+  reason: string | null;
+}
+
+export interface FairValueRange {
+  low: string | null;
+  base: string | null;
+  high: string | null;
+}
+
+export interface ValuationScenario {
+  label: string;
+  fair_value: string | null;
+  assumptions: string;
+  reason: string | null;
+}
+
+export interface ValuationV2Result {
+  ticker: string;
+  asset_class: string;
+  current_price: string | null;
+  valuation_status: string;
+  fair_value_range: FairValueRange;
+  scenarios: ValuationScenario[];
+  margin_of_safety: string | null;
+  required_margin_of_safety: string | null;
+  graham_sanity_check: string | null;
+  graham_reason: string | null;
+  implied_expectation: string | null;
+  implied_growth_rate: string | null;
+  confidence: string;
+  warnings: string[];
+  methodology: string[];
+  reason: string | null;
+}
+
+export interface IncomeRealEstateAnalysisResult {
+  ticker: string;
+  asset_class: string;
+  status: string;
+  pvp: string | null;
+  dividend_yield: string | null;
+  dy_own_history_average: string | null;
+  dy_stability: string;
+  dy_stability_reason: string | null;
+  confidence: string;
+  warnings: string[];
+  methodology: string[];
+  reason: string | null;
+}
+
+export interface PortfolioAdequacyResult {
+  ticker: string;
+  asset_class: string;
+  valuation_applicable: boolean;
+  valuation_note: string;
+  adequacy_status: string;
+  evaluated_dimension: string | null;
+  current_weight: string | null;
+  target_weight: string | null;
+  min_weight: string | null;
+  max_weight: string | null;
+  gap_to_target: string | null;
+  rebalance_required: boolean;
+  extreme_overweight: boolean;
+  alert_message: string | null;
+  class_current_weight: string | null;
+  class_target_weight: string | null;
+  warnings: string[];
+}
+
+export interface TrapFlag {
+  trap_type: string;
+  label: string;
+  severity: string;
+  affected_metric: string;
+  explanation: string;
+  impact_on_score: string;
+  recommended_interpretation: string;
+  confidence_penalty: string;
+}
+
+export interface TrapDetectionResult {
+  ticker: string;
+  asset_class: string;
+  flags: TrapFlag[];
+  confidence_penalty: string;
+  reason: string | null;
+}
+
+export interface FieldAvailability {
+  field: string;
+  label: string;
+  available: boolean;
+  value: string | null;
+  source: string | null;
+  updated_at: string | null;
+  warning: string | null;
+}
+
+export interface CoveragePurposeScore {
+  score: string | null;
+  classification: string;
+  missing_labels: string[];
+  reason: string | null;
+}
+
+export interface DataCoverageResult {
+  ticker: string;
+  asset_class: string;
+  period_end: string | null;
+  fields: FieldAvailability[];
+  quality: CoveragePurposeScore;
+  valuation: CoveragePurposeScore;
+  trap_detection: CoveragePurposeScore;
+  income: CoveragePurposeScore;
+  decision_engine: CoveragePurposeScore;
+  summary: string;
+}
+
+export interface AssetDetailBundle {
+  ticker: string;
+  name: string;
+  asset_class: string;
+  currency: string;
+  is_manual: boolean;
+  lg_score: LGScoreResult | null;
+  conviction: ConvictionScoreResult | null;
+  data_quality: AssetDataQuality | null;
+  fundamentals: FundamentalSnapshotResult | null;
+  fundamentals_analysis: FundamentalsAnalysisResult | null;
+  legacy_valuation: ValuationResult | null;
+  valuation_v2: ValuationV2Result | null;
+  income_real_estate: IncomeRealEstateAnalysisResult | null;
+  adequacy: PortfolioAdequacyResult | null;
+  trap_detection: TrapDetectionResult | null;
+  coverage: DataCoverageResult | null;
+}
+
+export async function fetchAtivos(): Promise<AssetRowView[]> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/ativos`, { cache: "no-store" });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+  if (!response.ok) {
+    throw new ApiError(response.statusText, response.status);
+  }
+  return response.json();
+}
+
+export async function fetchAtivoDetail(ticker: string, portfolioId = 1): Promise<AssetDetailBundle> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `${API_URL}/api/ativos/${encodeURIComponent(ticker)}?portfolio_id=${portfolioId}`,
+      { cache: "no-store" },
+    );
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+  return response.json();
+}
+
+export interface ManualFlagResponse {
+  ticker: string;
+  is_manual: boolean;
+}
+
+export async function setManualFlag(ticker: string, isManual: boolean): Promise<ManualFlagResponse> {
+  const response = await fetch(`${API_URL}/api/ativos/${encodeURIComponent(ticker)}/manual-flag`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_manual: isManual }),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.statusText, response.status);
+  }
+  return response.json();
+}
+
+export interface ManualPriceResponse {
+  ticker: string;
+  price: string;
+  source: string;
+}
+
+export async function setManualPrice(ticker: string, price: string): Promise<ManualPriceResponse> {
+  const response = await fetch(`${API_URL}/api/ativos/${encodeURIComponent(ticker)}/manual-price`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ price }),
+  });
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+  return response.json();
+}
+
+export async function refreshAtivoPrice(ticker: string): Promise<{ result: UpdateResult }> {
+  const response = await fetch(`${API_URL}/api/ativos/${encodeURIComponent(ticker)}/refresh-price`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new ApiError(response.statusText, response.status);
+  }
+  return response.json();
+}
+
+export interface UpdateResult {
+  ticker: string;
+  inserted: number;
+  updated: number;
+  rejected: number;
+  skipped_manual: boolean;
+  error: string | null;
+}
+
+export interface FundamentalsCollectionResult {
+  ticker: string;
+  collected: boolean;
+  period_end: string | null;
+  reason: string | null;
+  error: string | null;
+}
+
+export async function collectAtivoFundamentals(
+  ticker: string,
+): Promise<{ result: FundamentalsCollectionResult }> {
+  const response = await fetch(
+    `${API_URL}/api/ativos/${encodeURIComponent(ticker)}/collect-fundamentals`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw new ApiError(response.statusText, response.status);
+  }
+  return response.json();
+}
+
+export interface BatchFundamentalsResult {
+  results: FundamentalsCollectionResult[];
+}
+
+export async function collectAllFundamentals(): Promise<{ result: BatchFundamentalsResult }> {
+  const response = await fetch(`${API_URL}/api/ativos/collect-fundamentals-batch`, { method: "POST" });
+  if (!response.ok) {
+    throw new ApiError(response.statusText, response.status);
+  }
+  return response.json();
+}
+
+export interface FundamentalsImportRowOutcomeView {
+  line: number;
+  ticker: string;
+  period_end: string | null;
+  status: string;
+  fields_applied: string[];
+  reported_source: string | null;
+  message: string | null;
+}
+
+export interface FundamentalsImportRowErrorView {
+  line: number;
+  field: string | null;
+  message: string;
+}
+
+export interface FundamentalsImportResultView {
+  total_rows: number;
+  imported: number;
+  conflicts_pending: number;
+  outcomes: FundamentalsImportRowOutcomeView[];
+  errors: FundamentalsImportRowErrorView[];
+  tickers_recomputed: string[];
+  valuation_recalculated: number;
+  traps_recalculated: number;
+  scores_recalculated: number;
+}
+
+export async function importFundamentals(
+  file: File,
+  overwrite: boolean,
+  portfolioId = 1,
+): Promise<FundamentalsImportResultView> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${API_URL}/api/ativos/fundamentals-import?portfolio_id=${portfolioId}&overwrite=${overwrite}`,
+      { method: "POST", body: formData },
+    );
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+  return response.json();
+}

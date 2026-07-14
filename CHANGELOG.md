@@ -4,6 +4,36 @@ Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
 
+## [Unreleased] - v1.1 Premium Web App — Fase 6 (Ativos real no Next.js)
+
+### Contexto
+Autorizado pelo usuário ("quero") logo após validar a Fase 5 (Inteligência) rodando localmente. Leva a quinta tela do Next.js ao ar: Ativos — a maior migração até aqui, substituindo os 960 linhas de `pages_impl/ativos.py` (uma única página com seletores `st.selectbox`) por uma navegação REST-ful: `app/ativos` (lista) + `app/ativos/[ticker]` (detalhe). O detalhe compõe 10 schemas Pydantic diferentes (LG Score, Conviction Score v2, Data Quality, Fundamentos, Análise de Fundamentos/CAGR, Valuation v1, Valuation Engine 2.0, Análise de Renda Imobiliária, Adequação à Política, Trap Detection, Cobertura de Dados) — todos já eram `pydantic.BaseModel` 1:1, então a rota FastAPI só compõe, nenhum cálculo novo em lugar nenhum.
+
+### Adicionado
+- `backend/app/schemas/asset_row.py` — `AssetRowView` (linha da lista: ticker, classe, setor, preço, status do preço automático/manual/sem preço, atualizado em).
+- `backend/app/schemas/asset_detail.py` — `AssetDetailBundle`, compõe os 10 schemas de engine acima, todos opcionais (cada um é `None` quando não aplicável à classe do ativo ou quando não há histórico suficiente).
+- `backend/app/schemas/asset_actions.py` — `ManualFlagRequest/Response`, `ManualPriceRequest/Response`, `RefreshPriceResponse`, `CollectFundamentalsResponse`, `CollectFundamentalsBatchResponse`, `FundamentalsImportResultView` (espelha o dataclass `FundamentalsImportResult.as_dict()` do `FundamentalsImportService`, mesmo padrão usado para `ImportResultView` na Fase 4).
+- `backend/app/api/routes/ativos.py` — 8 endpoints: `GET /api/ativos` (lista), `GET /api/ativos/{ticker}` (detalhe, 404 se não encontrado), `PATCH /api/ativos/{ticker}/manual-flag`, `POST /api/ativos/{ticker}/manual-price` (422 se preço ≤ 0), `POST /api/ativos/{ticker}/refresh-price` (Yahoo Finance, pula ativos manuais), `POST /api/ativos/{ticker}/collect-fundamentals`, `POST /api/ativos/collect-fundamentals-batch`, `POST /api/ativos/fundamentals-import` (upload CSV/Excel, 422 para extensão não suportada).
+- `backend/tests/unit/test_api_ativos.py` (11 testes) — contrato/wiring: lista com status de preço correto, detalhe compõe o bundle certo e devolve o bloco certo por classe (ação usa `valuation_v2`, não `income_real_estate`/`adequacy`), 404 para ticker desconhecido, flag manual muda o ativo, preço manual cria `Price` com `source="manual"` e rejeita valor não positivo, refresh de preço e coleta de fundamentos pulam ativos manuais sem precisar de rede (usa o `skipped_manual`/`reason="ativo manual"` que os services já tinham), importação rejeita extensão não suportada.
+- `frontend-next/lib/api.ts` — ~18 tipos novos espelhando 1:1 os schemas acima (`AssetRowView`, `LGScoreResult`, `ConvictionScoreResult`, `AssetDataQuality`, `FundamentalSnapshotResult`, `FundamentalsAnalysisResult`, `ValuationResult`, `ValuationV2Result`, `IncomeRealEstateAnalysisResult`, `PortfolioAdequacyResult`, `TrapDetectionResult`, `DataCoverageResult`, `AssetDetailBundle` etc.) + `fetchAtivos()`, `fetchAtivoDetail()`, `setManualFlag()`, `setManualPrice()`, `refreshAtivoPrice()`, `collectAtivoFundamentals()`, `collectAllFundamentals()`, `importFundamentals()`.
+- `frontend-next/lib/adapt-ativos.ts` — rótulos/cores de status (preço, confiança, valuation, renda imobiliária, adequação, armadilhas, classificação, pilares), mesmo vocabulário de `frontend/streamlit_app/components/badges.py`.
+- `frontend-next/components/asset-list-table.tsx` — tabela da lista com link por ticker para o detalhe, aviso para ativos sem nenhum preço cadastrado.
+- `frontend-next/components/asset-score-panel.tsx` — LG Score + Conviction Score v2 lado a lado, com explicação por pilar (mesma leitura de "LG Score de um ativo" e "LG Conviction Score v2").
+- `frontend-next/components/fundamentals-panel.tsx` — snapshot de fundamentos (9 campos em destaque), CAGR de receita/lucro/EBITDA/FCF, valuation legado v1 por múltiplos.
+- `frontend-next/components/fundamental-analysis-panel.tsx` — bloco condicional por classe (Valuation Engine 2.0 para ações, Análise de Renda Imobiliária para FII/REIT, Adequação à Política para ETF/cripto/Tesouro) + armadilhas detectadas (Trap Detection).
+- `frontend-next/components/data-coverage-panel.tsx` — score de cobertura por finalidade (qualidade/valuation/armadilhas/renda/decisão) + campos disponíveis/ausentes expansíveis.
+- `frontend-next/components/asset-actions-panel.tsx` (client) — marcar/desmarcar ativo manual, cadastrar preço manual, atualizar preço automático, coletar fundamentos (um ativo).
+- `frontend-next/components/fundamentals-batch-collect-button.tsx` (client) — coleta de fundamentos em lote (todos os ativos automáticos).
+- `frontend-next/components/fundamentals-import-panel.tsx` (client) — upload de CSV/Excel com opção de sobrescrever conflitos, resumo de importados/conflitos/recalculados e detalhe por linha.
+- `frontend-next/app/ativos/page.tsx` — server component: lista de ativos + coleta em lote + importação de fundamentos.
+- `frontend-next/app/ativos/[ticker]/page.tsx` — server component: scores, fundamentos, análise fundamentalista, cobertura de dados e ações, com tratamento de 404 e erro de conexão.
+- `frontend-next/components/sidebar.tsx` — item "Ativos" passa de `href="#"` para `href="/ativos"`.
+
+### Deixado de fora (fases seguintes)
+- Radar, Simulação, Journal, Configurações, Dividendos.me continuam só no Streamlit.
+- Nenhuma mudança em `backend/app/engines` ou `backend/app/services`.
+- `npm run build` não pôde ser verificado de ponta a ponta neste sandbox (proxy bloqueia o fetch da fonte Inter no Google Fonts) — `typecheck` e `lint` rodaram limpos; build de produção deve ser conferido localmente.
+
 ## [Unreleased] - v1.1 Premium Web App — Fase 5 (Inteligência real no Next.js)
 
 ### Contexto
@@ -1373,44 +1403,4 @@ Reforçada em toda a Fase 4, com testes dedicados: todo bloqueio (por ativo, por
 Terceira fase da evolução da LG INVEST de dashboard para Investment Decision System: criação da fundação de configuração explícita (Investment Policy) e da segunda versão do Target Allocation Engine, cobrindo 4 dimensões independentes (classe, moeda, país, ativo) em vez de só classe. Nenhuma engine ou tela existente foi alterada de forma destrutiva — tudo aditivo.
 
 ### Adicionado — Investment Policy
-- Nova tabela `investment_policy` (uma linha por carteira): perfil do investidor, horizonte, moeda base, tolerância a risco, limites (`max_asset_weight`, `max_crypto_weight`, `target_international_min/max`, `target_fii_max`), metas de referência informativas por classe/mercado, `rebalance_threshold`, `monthly_contribution_default` e `notes`.
-- `InvestmentPolicyRepository` (get/create/update) e `InvestmentPolicyService` (`get_or_create`, `update` com `exclude_unset` para edição parcial).
-- Defaults de primeira leitura coerentes com o perfil descrito pelo usuário (investidor jovem, horizonte 50+ anos, Buy and Hold, tolerância moderada/alta, internacionalização crescente, FIIs úteis mas não centrais, BTC pequeno) — sempre editáveis, nunca uma recomendação financeira (aviso explícito em `notes` e na UI).
-- Schemas `InvestmentPolicyView`/`InvestmentPolicyUpdate` (Pydantic v2).
-
-### Adicionado — Target Allocation Engine v2
-- Nova tabela `target_allocation_rules`: meta granular por dimensão (`class`/`currency`/`country`/`asset`), com peso mínimo/alvo/máximo e prioridade manual de aporte. Índice único por `(portfolio_id, dimension_type, dimension_key)`. Começa vazia — nenhuma regra é pré-cadastrada com valor inventado.
-- `TargetAllocationRuleEngine` (pura, nova classe em `engines/target_allocation/engine.py`, convivendo sem alterar `TargetAllocationEngine` v1): calcula `gap_status` (`underweight`/`neutral`/`overweight`/`blocked`), `contribution_priority`, `rebalance_required`, `extreme_overweight` (peso > 1.5x o máximo) e `alert_message` por regra.
-- Regra de segurança reforçada por teste: `overweight`/`blocked` nunca têm `contribution_priority` > 0, e a mensagem de `overweight` usa explicitamente "não vender" — mesmo em desvio extremo, a engine só torna o alerta mais forte, nunca gera uma recomendação de venda automática.
-- `TargetAllocationRuleRepository` (list/get/upsert/delete) e `TargetAllocationRuleService` (`list_rules`, `set_rule` com validação de dimensão/pesos negativos/min<=max/target<=max, `delete_rule`).
-- `TargetAllocationService.evaluate_portfolio_rules(portfolio_id)` (novo, ao lado do `evaluate_portfolio()` v1 inalterado): calcula pesos atuais por dimensão via `build_dashboard_view()` + `AssetRepository` e avalia contra as regras salvas.
-
-### Adicionado — UI (Configurações)
-- Nova seção "Política de investimento": visualiza e edita todos os campos de `InvestmentPolicy`, com aviso permanente de que não é recomendação financeira.
-- Nova seção "Alocação-alvo detalhada (classe / moeda / país / ativo)": lista regras existentes em tabela, formulário para adicionar/editar (upsert) e remover regra por dimensão/chave.
-
-### Migration
-- `f1993c6433b8_create_investment_policy_and_target_allocation_rules` — cria as duas tabelas novas, puramente aditiva (`downgrade()` completo). Testada nesta sessão com `alembic upgrade head` → `downgrade -1` → `upgrade head` novamente contra um banco SQLite descartável (não o banco de desenvolvimento real, que apresentou corrupção de leitura no ambiente de sandbox usado nesta sessão — ver Riscos conhecidos).
-
-### Documentação
-- Novo `docs/INVESTMENT_POLICY.md` e novo `docs/TARGET_ALLOCATION_ENGINE.md`.
-
-### Testes
-- Novo `test_target_allocation_rule_engine.py` (11 testes): status por dimensão, prioridade de aporte, `rebalance_required`, regra de nunca recomendar venda, independência entre dimensões.
-- Novo `test_investment_policy_service.py` (6 testes): defaults na primeira leitura, persistência real em banco, não duplicação, atualização parcial.
-- Novo `test_target_allocation_rule_service.py` (12 testes): validações de dimensão/chave/pesos, upsert sem duplicar, delete, independência entre dimensões com a mesma chave.
-- Suíte completa: **683 testes passando**, 0 falhas. `ruff check` e `black --check --fast` limpos.
-
-### Riscos conhecidos
-- O banco de desenvolvimento real (`data/lg_invest.db`) não pôde ser lido neste ambiente de sandbox nesta sessão (`sqlite3.DatabaseError: database disk image is malformed` ao tentar `alembic current`/`upgrade` contra ele) — por segurança, a migration **não foi executada contra ele**. A migration foi validada de ponta a ponta (upgrade/downgrade/upgrade) contra um banco SQLite descartável criado do zero, incluindo toda a cadeia de migrations anteriores. **Ação necessária do usuário**: rodar `alembic upgrade head` localmente, no ambiente Windows onde o banco real está íntegro, antes de usar as novas telas de Configurações.
-- Nenhuma tela ainda exibe o resultado de `evaluate_portfolio_rules()` (gaps, prioridades, alertas) — só o cadastro de regras existe nesta fase. A visualização fica para a Fase 9 ou antes, se o Decision Engine 3.0 precisar dela.
-- Os campos de `investment_policy` (ex.: `target_brazil_equity`) não são copiados automaticamente para `target_allocation_rules` — são conceitualmente separados por decisão desta sprint (ver `docs/TARGET_ALLOCATION_ENGINE.md`).
-
-## [1.25.0] - Sprint 24 (Fase 9) — Dashboard 2.0: exposição visual das 5 engines das Fases 4-8
-
-### Contexto
-Nona fase da evolução da LG INVEST de dashboard para Investment Decision System: nenhuma engine nova — o trabalho foi só de UI, expondo nas telas Streamlit os cinco motores construídos e testados nas Fases 4 a 8 (Decision Engine 3.0, Monte Carlo Simulation Engine, Portfolio Risk Engine, Income Engine, Portfolio Health Score), que até aqui só existiam como serviço/engine testados por trás.
-
-### Adicionado — Tela nova: Simulação
-- `pages_impl/simulacao.py` (nova tela, registrada em `app.py` e no smoke test): formulário de aporte mensal presumido, horizonte em anos, número de simulações e semente fixa opcional (resultado reproduzível); chama `SimulationService.run_portfolio_simulation`.
-- `charts/simulation_charts.py`: `chart_simulation_percentiles()` — gráfico 
+- Nova tabela `investment_policy` (uma linha por carteira): perf
