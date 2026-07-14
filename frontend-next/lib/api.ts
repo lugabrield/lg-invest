@@ -352,3 +352,131 @@ export async function importPortfolio(file: File, portfolioId = 1): Promise<Impo
 
   return response.json();
 }
+
+// --- Inteligência (v1.1, Fase 5) — espelha 1:1
+// backend/app/schemas/intelligence_dashboard.py, ids_methodology.py,
+// target_allocation.py e income_analysis.py (via
+// backend/app/schemas/intelligence_bundle.py). Nenhum cálculo novo:
+// buckets/rankings/rótulos ficam em lib/adapt-intelligence.ts.
+
+export interface ConvictionPillarResult {
+  name: string;
+  score: string; // 0..100
+  confidence: string; // fração 0..1
+  reasons: string[];
+}
+
+export interface AssetIntelligence {
+  ticker: string;
+  asset_class: string;
+  current_weight: string; // fração 0..1
+  has_conviction_score: boolean;
+  conviction_score: string | null;
+  classification: string | null;
+  confidence: string | null;
+  confidence_label: string | null;
+  quality: string | null;
+  valuation: string | null;
+  growth: string | null;
+  risk: string | null;
+  capital_reinvestment: string | null;
+  recommendation_hint: string;
+  explanation: ConvictionPillarResult[];
+  unavailable_reason: string | null;
+}
+
+export interface AllocationClassDrift {
+  asset_class: string;
+  current_pct: string; // fração 0..1
+  target_pct: string; // fração 0..1
+  drift_pct: string;
+  status: string; // "abaixo" | "dentro" | "acima"
+}
+
+export interface TargetAllocationResult {
+  has_target: boolean;
+  classes: AllocationClassDrift[];
+  most_underweight_class: string | null;
+  reason: string | null;
+}
+
+export interface IntelligenceDashboardView {
+  assets: AssetIntelligence[];
+  average_conviction_score: string | null;
+  coverage_pct: string; // fração 0..1
+  classification_counts: Record<string, number>;
+  most_convicted: AssetIntelligence | null;
+  least_convicted: AssetIntelligence | null;
+  allocation_drift: TargetAllocationResult;
+}
+
+export interface MonthlyPointView {
+  year: number;
+  month: number;
+  amount_total: string;
+}
+
+export interface PortfolioIncomeTrendView {
+  ttm_total: string;
+  prior_ttm_total: string;
+  growth_pct: string | null; // fração
+  monthly_series: MonthlyPointView[];
+  projected_next_12_months: string;
+  months_with_data_ttm: number;
+  months_with_data_prior_ttm: number;
+  reason: string;
+}
+
+export interface TickerIncomeRowView {
+  ticker: string;
+  ttm_income: string;
+  cost_basis: string | null;
+  yield_on_cost: string | null; // fração
+}
+
+export interface TickerIncomeBreakdownView {
+  rows: TickerIncomeRowView[];
+  concentration_hhi: string | null;
+  portfolio_yield_on_cost: string | null; // fração
+  excluded_tickers_without_position: string[];
+  reason: string;
+}
+
+export interface IncomeAnalysisResultView {
+  model_version: string;
+  trend: PortfolioIncomeTrendView;
+  breakdown: TickerIncomeBreakdownView;
+  reasons: string[];
+  warnings: string[];
+}
+
+export interface IntelligenceBundle {
+  view: IntelligenceDashboardView;
+  income: IncomeAnalysisResultView;
+}
+
+export async function fetchIntelligence(portfolioId = 1): Promise<IntelligenceBundle> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/intelligence?portfolio_id=${portfolioId}`, {
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+
+  return response.json();
+}

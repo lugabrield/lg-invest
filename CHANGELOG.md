@@ -4,6 +4,30 @@ Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
 
+## [Unreleased] - v1.1 Premium Web App — Fase 5 (Inteligência real no Next.js)
+
+### Contexto
+Autorizado pelo usuário ("pode sim") logo após validar a Fase 4 (Carteira) rodando localmente. Leva a quarta tela do Next.js ao ar: Inteligência. Mesma composição de `frontend/streamlit_app/cache.py::cached_intelligence_bundle` — `build_intelligence_dashboard()` (Conviction Score v2 + alocação-alvo por classe, Sprint 19) e `IncomeAnalysisService.evaluate()` (renda de proventos, Sprint 24 Fase 7) — ambos já tinham (ou ganharam agora) schema Pydantic 1:1, então nenhuma lógica de decisão foi duplicada no frontend: buckets por classificação, rankings por pilar e rótulos em português ficam só em `lib/adapt-intelligence.ts`, espelhando exatamente `pages_impl/inteligencia.py`.
+
+### Adicionado
+- `backend/app/schemas/intelligence_bundle.py` — `IntelligenceBundle` (embrulha `IntelligenceDashboardView`, já `pydantic.BaseModel`, com `IncomeAnalysisResultView`, convertido via `.model_validate()` a partir do dataclass puro `IncomeAnalysisResult` do Income Engine — mesmo padrão de `AssetSummary.model_validate(asset)` em `routes/aporte.py`).
+- `backend/app/api/routes/intelligence.py` — `GET /api/intelligence`: chama `build_intelligence_dashboard()` e `IncomeAnalysisService(db).evaluate()`, sem cache próprio ainda (paralelo a `GET /api/dashboard`).
+- `backend/tests/unit/test_api_intelligence.py` (3 testes) — contrato/wiring: view + income no formato certo (Decimal como string), carteira vazia não quebra (view.assets == [] e income com listas vazias, nunca erro), `portfolio_id` default.
+- `frontend-next/lib/api.ts` — tipos `ConvictionPillarResult`, `AssetIntelligence`, `AllocationClassDrift`, `TargetAllocationResult`, `IntelligenceDashboardView`, `MonthlyPointView`, `PortfolioIncomeTrendView`, `TickerIncomeRowView`, `TickerIncomeBreakdownView`, `IncomeAnalysisResultView`, `IntelligenceBundle` (espelham 1:1 os schemas Pydantic) + `fetchIntelligence()`.
+- `frontend-next/lib/adapt-intelligence.ts` — adaptador puro: `bucketAssets()` (mesmo agrupamento Aportar/Candidato/Manter/Monitorar/Evitar/Dados insuficientes de `_bucket_assets()`), `rankBy()` (mesmo filtro de classes aplicáveis por pilar de `_RANKING_APPLICABLE_CLASSES`, Sprint 22), rótulos/ícones/cores de classificação (mesmo vocabulário de `styles/theme.py`).
+- `frontend-next/components/conviction-buckets.tsx` — um "expander" por classificação (client), mesma leitura dos blocos de `pages_impl/inteligencia.py`.
+- `frontend-next/components/conviction-rankings.tsx` — colunas de ranking (mais baratos, maior qualidade, maior crescimento, mais caros, maior risco), mesma leitura de `_render_asset_line()`.
+- `frontend-next/components/asset-intelligence-detail.tsx` (client) — "Por que esse ativo?": seletor de ativo, pilares do Conviction Score, motivos por pilar, pilar mais forte/mais fraco e pilares com confiança baixa, mesma leitura de `_why_this_asset()`.
+- `frontend-next/components/allocation-drift-table.tsx` — tabela Atual/Meta/Desvio/Status por classe, com aviso quando não há meta configurada.
+- `frontend-next/components/income-summary.tsx` — métricas de renda (TTM, crescimento, projeção) e tabela de yield on cost por ativo.
+- `frontend-next/app/inteligencia/page.tsx` — server component: busca `GET /api/intelligence`, compõe resumo executivo, classificação, rankings, diagnóstico por ativo, alocação-alvo e renda de proventos.
+- `frontend-next/components/sidebar.tsx` — item "Inteligência" passa de `href="#"` para `href="/inteligencia"`.
+
+### Deixado de fora (fases seguintes)
+- Ativos, Radar, Simulação, Journal, Configurações, Dividendos.me continuam só no Streamlit.
+- Nenhuma mudança em `backend/app/engines` ou `backend/app/services`.
+- `npm run build` não pôde ser verificado de ponta a ponta neste sandbox (proxy bloqueia o fetch da fonte Inter no Google Fonts, HTTP 403) — `typecheck` e `lint` rodaram limpos; build de produção deve ser conferido localmente.
+
 ## [Unreleased] - v1.1 Premium Web App — Fase 4 (Carteira real no Next.js)
 
 ### Contexto
@@ -1389,32 +1413,4 @@ Nona fase da evolução da LG INVEST de dashboard para Investment Decision Syste
 
 ### Adicionado — Tela nova: Simulação
 - `pages_impl/simulacao.py` (nova tela, registrada em `app.py` e no smoke test): formulário de aporte mensal presumido, horizonte em anos, número de simulações e semente fixa opcional (resultado reproduzível); chama `SimulationService.run_portfolio_simulation`.
-- `charts/simulation_charts.py`: `chart_simulation_percentiles()` — gráfico de faixa horizontal mostrando p10–p90 (faixa clara), p25–p75 (faixa destacada) e a mediana marcada, já que a engine devolve só os percentis do valor final, não uma trajetória ano a ano.
-- Métricas (valor inicial, total aportado no horizonte, mediana projetada, probabilidade de perda), tabela de percentis, premissas/simplificações usadas e avisos da engine, sempre com o aviso de que é uma projeção probabilística, não uma previsão real de mercado nem recomendação financeira.
-
-### Adicionado — Dashboard: Saúde da Carteira e Risco da Carteira
-- Nova seção "Saúde da Carteira" (`PortfolioHealthService`, Fase 8): badge de classificação + score, métrica por pilar disponível, detalhamento por pilar (nota ou "indisponível" + motivo) num expander, avisos da engine.
-- Nova seção "Risco da Carteira" (`PortfolioRiskService`, Fase 6): badge de classificação, tolerância declarada, alerta quando o risco medido diverge da tolerância, métrica por fator disponível, detalhamento por fator num expander.
-- Ambas posicionadas entre "Visão Geral" e "Oportunidades & Riscos", sempre deixando claro que são relatórios informativos — nunca uma recomendação de compra ou venda.
-
-### Adicionado — Inteligência: Renda de Proventos
-- Nova seção "Renda de Proventos" (`IncomeAnalysisService`, Fase 7): renda dos últimos 12 meses, crescimento vs. período anterior, projeção para os próximos 12 meses, e tabela de yield on cost por ativo (custo de aquisição, não preço de mercado atual) com o yield on cost agregado da carteira quando calculável. Tendência (fonte agregada por carteira) e breakdown por ativo (fonte granular) permanecem explicitamente separados, nunca somados entre si.
-
-### Adicionado — Aporte: seletor de motor v1/v2/v3
-- `st.radio` "Motor de recomendação" substitui o antigo checkbox `use_v2`, agora com três opções (v1/v2/v3) e texto de ajuda explicando a diferença de cada uma. `recommend_v3()` (Decision Engine 3.0, Fase 4) passa a ser chamável direto da tela, reaproveitando a mesma tabela de distribuição/justificativa por ativo já usada para v1/v2 — o schema `RecommendationItem` já expunha `conviction_score`/`item_confidence` para v3 sem mudança de schema. Texto de ajuda reitera que nenhuma versão jamais recomenda venda, apenas pausa aporte.
-
-### Adicionado — Configurações: premissas do Monte Carlo
-- Nova seção "Premissas do Monte Carlo (retorno e volatilidade por classe)": tabela com a premissa atual de cada classe, e um expander para editar/resetar por classe individual, reaproveitando `simulation_assumptions_service` (Fase 5) — a mesma fonte usada pela tela Simulação e pelo fator de volatilidade do Portfolio Risk Engine.
-
-### Documentação
-- Atualizadas as seções "O que ainda não existe" de `docs/DECISION_ENGINE_3.md`, `docs/SIMULATION_ENGINE.md`, `docs/PORTFOLIO_RISK_ENGINE.md`, `docs/INCOME_ENGINE.md` e `docs/PORTFOLIO_HEALTH_SCORE.md`, que diziam "a exposição visual fica para a Fase 9" — agora descrevem onde cada resultado aparece na UI e o que de fato ainda falta (histórico ao longo do tempo, trajetória ano a ano, orquestração automática entre engines).
-
-### Testes
-- `test_streamlit_smoke.py`: `simulacao` adicionado a `PAGE_MODULES`.
-- Nenhuma lógica nova de engine/serviço nesta fase — os testes das Fases 4-8 continuam cobrindo o cálculo; a UI em si segue a convenção do projeto de não ter teste unitário dedicado além do smoke de import.
-- Suíte completa: **795 testes passando**, 0 falhas. `ruff check` e `black --check --fast` limpos.
-
-### Riscos conhecidos
-- Nenhuma migration nova nesta fase — sem ação de banco pendente.
-- O Dashboard agora chama `PortfolioHealthService.evaluate()` e `PortfolioRiskService.evaluate()` (que por sua vez compõem várias outras engines/serviços) a cada carregamento de página, sem cache — aceitável para o MVP, mas candidato natural de otimização na Fase 10 (Performance/cache).
-- `PortfolioRiskService.evaluate()` é chamado no Dashboard 
+- `charts/simulation_charts.py`: `chart_simulation_percentiles()` — gráfico 
