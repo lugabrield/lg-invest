@@ -4,6 +4,28 @@ Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
 
+## [Unreleased] - v1.1 Premium Web App — Fase 4 (Carteira real no Next.js)
+
+### Contexto
+Autorizado pelo usuário ("sim, pode continuar") logo após validar a Fase 3 (Aporte v3) rodando localmente. Leva a terceira tela do Next.js ao ar: Carteira. A leitura (posições, pesos, grupos, resumo Brasil x exterior) não precisou de endpoint novo — reaproveita integralmente `GET /api/dashboard` (`view.positions`), o mesmo dado que `pages_impl/carteira.py` já lia via `build_dashboard_view()`. Só a importação de arquivo (CSV/Excel) é nova em HTTP, chamando o mesmo `PortfolioImportService` (inalterado).
+
+### Adicionado
+- `backend/app/schemas/portfolio_import.py` — `ImportResultView`/`ImportErrorView`, espelhando 1:1 os dataclasses `ImportResult`/`ImportError.as_dict()` já existentes em `backend/app/etl/importers/import_result.py`.
+- `backend/app/api/routes/portfolio.py` — `POST /api/portfolio/import`: recebe upload multipart (`UploadFile`), valida extensão (`.csv`/`.xlsx`/`.xls`, 422 caso contrário), cria a carteira se ainda não existir (mesmo comportamento de `_ensure_portfolio` da tela Streamlit) e chama `PortfolioImportService.import_positions()` sobre um arquivo temporário, sempre limpo no `finally`.
+- `backend/tests/unit/test_api_portfolio.py` (5 testes) — contrato/wiring: importação válida cria posição, cria carteira ausente, importação é idempotente (segunda chamada atualiza em vez de duplicar), ticker desconhecido reporta erro de linha sem 500, extensão não suportada devolve 422.
+- `frontend-next/lib/api.ts` — `ImportResultView`/`ImportErrorView` e `importPortfolio(file, portfolioId)` (multipart via `FormData`, sem `Content-Type` manual).
+- `frontend-next/lib/adapt-carteira.ts` — adaptador puro sobre `DashboardView` (mesmo dado do Dashboard): resumo Brasil/exterior/maior posição (mesma regra de `carteira.py`, atenção quando peso ≥ 20%), linha de posição para a tabela (mesmas colunas simples/detalhadas e rótulos de origem de preço de `components/tables.py`), agrupamento por `GROUP_ORDER` (mesma ordem de `dashboard_view_service.py`) com total e contagem de posições em queda por grupo.
+- `frontend-next/components/positions-table.tsx` — tabela de posições com toggle simples/detalhado (mesmas colunas de `_SIMPLE_COLUMNS` vs. modo detalhado do Streamlit), destaque de maior posição.
+- `frontend-next/components/grouped-positions.tsx` — um "expander" por grupo de classe (cabeçalho com total + contagem de posições negativas), mesma leitura de `render_grouped_positions()`.
+- `frontend-next/components/portfolio-upload.tsx` (client) — upload de CSV/Excel, mostra resumo (importadas/atualizadas/ignoradas) e tabela de erros por linha; após sucesso, força `router.refresh()` para a página recarregar o dashboard com o dado novo.
+- `frontend-next/app/carteira/page.tsx` — server component: busca `GET /api/dashboard`, mostra cards de resumo, alerta de preços estimados, upload, tabela completa e agrupamento por classe; trata carteira vazia e erro de conexão com a API.
+- `frontend-next/components/sidebar.tsx` — item "Carteira" passa de `href="#"` para `href="/carteira"`.
+
+### Deixado de fora (fases seguintes)
+- Inteligência, Ativos, Radar, Simulação, Journal, Configurações, Dividendos.me continuam só no Streamlit.
+- Nenhuma mudança em `backend/app/engines` ou `backend/app/services`.
+- `npm run build` não pôde ser verificado de ponta a ponta neste sandbox (proxy bloqueia o fetch da fonte Inter no Google Fonts, HTTP 403) — `typecheck` e `lint` rodaram limpos; build de produção deve ser conferido localmente.
+
 ## [Unreleased] - v1.1 Premium Web App — Fase 3 (Aporte v3 real no Next.js)
 
 ### Contexto
@@ -1395,29 +1417,4 @@ Nona fase da evolução da LG INVEST de dashboard para Investment Decision Syste
 ### Riscos conhecidos
 - Nenhuma migration nova nesta fase — sem ação de banco pendente.
 - O Dashboard agora chama `PortfolioHealthService.evaluate()` e `PortfolioRiskService.evaluate()` (que por sua vez compõem várias outras engines/serviços) a cada carregamento de página, sem cache — aceitável para o MVP, mas candidato natural de otimização na Fase 10 (Performance/cache).
-- `PortfolioRiskService.evaluate()` é chamado no Dashboard sem `probability_of_loss` (que viria do Monte Carlo Simulation Engine) — o fator de risco de cauda aparece como indisponível até o usuário rodar a tela Simulação manualmente; não há, ainda, orquestração automática entre as duas engines.
-
-## [1.26.0] - Sprint 24 (Fase 10) — Cache, testes finais e consolidação do Investment Decision System
-
-### Contexto
-Décima e última fase do plano de 10 fases da Sprint 24: cache básico para as leituras mais caras introduzidas na Fase 9, verificação final da suíte inteira e um documento de consolidação amarrando as 10 fases — do "dashboard bonito" ao Investment Decision System pedido no início da sprint.
-
-### Adicionado — Cache
-- Novo `frontend/streamlit_app/cache.py`: `cached_dashboard_bundle(portfolio_id, exchange_rate)` (substitui as 6 chamadas de serviço que a tela Dashboard fazia a cada carregamento) e `cached_intelligence_bundle(portfolio_id)` (substitui as 2 chamadas da tela Inteligência), ambos decorados com `st.cache_data(ttl=300)`. `clear_all_caches()` invalida os dois.
-- Dashboard ganhou um botão "🔄 Atualizar dados" que força `clear_all_caches()` e recarrega.
-- `clear_all_caches()` é chamado explicitamente logo após qualquer ação de escrita que os dois bundles leem: em Configurações (atualizar preços em lote, alocação-alvo simples, política de investimento, regra de alocação-alvo detalhada, premissas do Monte Carlo), em Ativos (atualizar preço de um ativo, coletar fundamentos, marcar/desmarcar manual, salvar preço manual) e em Carteira (importar posições). O TTL de 5 minutos funciona só como rede de segurança adicional, nunca como única defesa contra dado desatualizado.
-- A taxa de câmbio não precisa de invalidação explícita: por já ser parte da chave de cache de `cached_dashboard_bundle` (um `Decimal` hasheável), atualizá-la já produz uma nova entrada de cache automaticamente.
-
-### Documentação
-- Novo `docs/PERFORMANCE_CACHE.md`: descreve a camada de cache, por que o TTL é curto, e todos os pontos que chamam `clear_all_caches()`.
-- Novo `docs/INVESTMENT_DECISION_SYSTEM.md`: documento de consolidação das 10 fases — mapeia cada pergunta original do projeto (valor real da carteira, onde aportar, o que é mais atrativo, concentração, validade da tese, evolução das decisões) para a engine/tela que a responde hoje, e lista como as fases se compõem sem nenhuma recalcular a lógica de outra.
-
-### Testes
-- Novo `test_streamlit_cache.py` (2 testes): os dois bundles são de fato memoizados pelo `st.cache_data` (têm `.clear()`), e `clear_all_caches()` não lança erro. Segue a mesma convenção da camada Streamlit (sem teste de renderização) — o cálculo em si já é coberto pelos testes dos serviços que cada bundle compõe.
-- Suíte completa: **797 testes passando**, 0 falhas. `ruff check` e `black --check --fast` limpos.
-
-### Riscos conhecidos
-- Nenhuma migration nova nesta fase.
-- Cache não é compartilhado entre sessões/processos diferentes do Streamlit — suficiente para o uso local de um único usuário do MVP, mas não seria para um cenário multiusuário real.
-- Uma escrita direta no banco fora da UI (ex.: script rodado em paralelo) só é refletida quando o TTL de 5 minutos expirar, já que não há trigger de invalidação no nível do banco.
-- Com a Fase 10 concluída, o plano de 10 fases da Sprint 24 está encerrado — próximos passos possíveis (orquestração automática Simulation Engine → Risk Engine, histórico do Health Score ao longo do tempo, Fonte B de proventos) estão listados em `docs/INVESTMENT_DECISION_SYSTEM.md`.
+- `PortfolioRiskService.evaluate()` é chamado no Dashboard 

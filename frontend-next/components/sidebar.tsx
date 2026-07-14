@@ -18,13 +18,13 @@ import { cn } from "@/lib/utils";
 // Mesmos 3 grupos já validados no Streamlit (Sprint 30): Principal,
 // Análise, Operação — mantidos aqui para não reaprender a navegação.
 // Telas ainda não migradas para o Next.js ficam com `href: "#"` até sua
-// própria fase chegar (Fase 3 só entrega Dashboard + Aporte).
+// própria fase chegar (Fase 4 entrega Dashboard + Aporte + Carteira).
 const NAV_GROUPS = [
   {
     label: "Principal",
     items: [
       { label: "Dashboard", icon: LayoutDashboard, href: "/" },
-      { label: "Carteira", icon: Wallet, href: "#" },
+      { label: "Carteira", icon: Wallet, href: "/carteira" },
       { label: "Aporte", icon: BarChart3, href: "/aporte" },
     ],
   },

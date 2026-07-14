@@ -303,3 +303,52 @@ export async function simulateAporte(
 
   return response.json();
 }
+
+// --- Carteira (v1.1, Fase 4) — a leitura (posições, pesos, grupos) não
+// tem endpoint próprio: já vem de `fetchDashboard()` (`view.positions`).
+// Só a importação de arquivo é nova aqui, espelhando
+// backend/app/schemas/portfolio_import.py.
+
+export interface ImportErrorView {
+  line: number;
+  field: string | null;
+  message: string;
+}
+
+export interface ImportResultView {
+  total_rows: number;
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: ImportErrorView[];
+}
+
+export async function importPortfolio(file: File, portfolioId = 1): Promise<ImportResultView> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/portfolio/import?portfolio_id=${portfolioId}`, {
+      method: "POST",
+      body: formData,
+    });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+
+  return response.json();
+}
