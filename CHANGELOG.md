@@ -4,6 +4,30 @@ Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
 
+## [Unreleased] - v1.1 Premium Web App — Fase 7 (Radar/Watchlist real no Next.js)
+
+### Contexto
+Autorizado pelo usuário ("quero sim") logo após validar a Fase 6 (Ativos) rodando localmente. Leva a sexta tela do Next.js ao ar: Radar. Consome `WatchlistService` (CRUD + coleta de dados + troca de status) e `RadarService` (classificação pura de candidatos), exatamente como `pages_impl/radar.py` já fazia — nenhuma `Position` é criada, nenhum cálculo de patrimônio é duplicado. Diferente do Streamlit (um seletor único + botões de ação compartilhados), a versão Next.js dá a cada linha da Watchlist suas próprias ações (coletar dados, mudar status, remover), mais próximo do padrão REST-ful já usado nas fases anteriores.
+
+### Adicionado
+- `backend/app/schemas/radar_actions.py` — `WatchlistStatusUpdateRequest` (valida o novo status contra `WATCHLIST_STATUSES`) e `WatchlistCollectAllResult` (agrupa um `WatchlistDataCollectionResult` por ativo, mesmo botão "Coletar dados de todos" do Streamlit).
+- `backend/app/api/routes/radar.py` — 8 endpoints: `GET /api/watchlist` (lista), `POST /api/watchlist` (cadastra, 422 se duplicata ativa ou classe/status inválidos), `PATCH /api/watchlist/{id}` (edição parcial, 404 se não encontrado), `PATCH /api/watchlist/{id}/status` (qualquer transição, mesma regra livre do `WatchlistService.set_status`), `DELETE /api/watchlist/{id}` (204, 404 se não encontrado), `POST /api/watchlist/{id}/collect`, `POST /api/watchlist/collect-all`, `GET /api/radar` (classificação agregada via `RadarService.evaluate`).
+- `backend/tests/unit/test_api_radar.py` (14 testes) — contrato/wiring: lista vazia por padrão, cadastro cria entrada e rejeita duplicata/classe inválida, edição parcial muda só os campos enviados, troca de status aceita qualquer transição e rejeita status inválido, remoção deleta e 404 para id desconhecido, coleta individual e em lote devolvem resultado sem inventar confiança (mesma asserção de `test_watchlist_data_collection_ensures_asset_and_marks_low_confidence_without_prices`), avaliação do Radar vazia sem candidatos e inclui candidato da Watchlist.
+- `frontend-next/lib/api.ts` — tipos `WatchlistAssetView`, `WatchlistAssetCreatePayload`, `WatchlistAssetUpdatePayload`, `WatchlistDataCollectionResult`, `WatchlistCollectAllResult`, `RadarClassificationResult`, `RadarEvaluation` (espelham 1:1 os schemas Pydantic) + `fetchWatchlist()`, `addWatchlistAsset()`, `updateWatchlistAsset()`, `setWatchlistStatus()`, `removeWatchlistAsset()`, `collectWatchlistAssetData()`, `collectAllWatchlistData()`, `fetchRadarEvaluation()`.
+- `frontend-next/lib/adapt-radar.ts` — rótulos/ícones/cores por status da Watchlist e por classificação do Radar, mesmo vocabulário e mesma ordem (`CLASSIFICATION_ORDER`) de `pages_impl/radar.py`.
+- `frontend-next/components/watchlist-summary.tsx` — contagem por estágio do funil (monitorando/candidato/bloqueado/descartado/comprado) + quantos candidatos ainda não têm dado suficiente para o Radar classificar; exporta também `StatusPill` (badge reutilizado na tabela).
+- `frontend-next/components/watchlist-form.tsx` (client) — cadastro de novo candidato, mesmos campos do formulário Streamlit (ticker, nome, classe, país, moeda, status inicial, prioridade, setor, tese, notas).
+- `frontend-next/components/watchlist-row-actions.tsx` (client) — coletar dados, mudar status (qualquer transição) e remover, por linha da Watchlist.
+- `frontend-next/components/watchlist-table.tsx` — tabela de candidatos com score/confiança/classificação do Radar mesclados por ticker, compõe `WatchlistRowActions` por linha.
+- `frontend-next/components/radar-opportunity-sections.tsx` — uma seção por classificação (Já tenho / Novo candidato / Monitorar / Evitar / Bloqueado / Dado insuficiente), com tabela + motivos por ativo (expansível).
+- `frontend-next/app/radar/page.tsx` — server component: busca `GET /api/watchlist` + `GET /api/radar` em paralelo, compõe resumo, formulário, tabela e radar de oportunidades.
+- `frontend-next/components/sidebar.tsx` — item "Radar" passa de `href="#"` para `href="/radar"`.
+
+### Deixado de fora (fases seguintes)
+- Simulação, Journal, Configurações, Dividendos.me continuam só no Streamlit.
+- Nenhuma mudança em `backend/app/engines` ou `backend/app/services`.
+- `npm run build` não pôde ser verificado de ponta a ponta neste sandbox (proxy bloqueia o fetch da fonte Inter no Google Fonts) — `typecheck` e `lint` rodaram limpos; build de produção deve ser conferido localmente.
+
 ## [Unreleased] - v1.1 Premium Web App — Fase 6 (Ativos real no Next.js)
 
 ### Contexto

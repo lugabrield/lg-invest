@@ -950,3 +950,206 @@ export async function importFundamentals(
   }
   return response.json();
 }
+
+// --- Radar / Watchlist (v1.1, Fase 7) — espelha 1:1
+// backend/app/schemas/watchlist.py, radar.py e radar_actions.py. A
+// Watchlist é um cadastro de candidatos — nunca uma posição; nenhuma
+// destas funções cria `Position` ou altera patrimônio.
+
+export interface WatchlistAssetView {
+  id: number;
+  portfolio_id: number;
+  ticker: string;
+  name: string;
+  asset_class: string;
+  country: string;
+  currency: string;
+  sector: string | null;
+  status: string;
+  priority: number;
+  thesis: string | null;
+  notes: string | null;
+  source: string;
+  already_in_portfolio: boolean;
+  last_collected_at: string | null;
+}
+
+export interface WatchlistAssetCreatePayload {
+  ticker: string;
+  name: string;
+  asset_class: string;
+  country: string;
+  currency: string;
+  sector?: string | null;
+  status?: string;
+  priority?: number;
+  thesis?: string | null;
+  notes?: string | null;
+  source?: string;
+}
+
+export interface WatchlistAssetUpdatePayload {
+  name?: string;
+  asset_class?: string;
+  country?: string;
+  currency?: string;
+  sector?: string | null;
+  status?: string;
+  priority?: number;
+  thesis?: string | null;
+  notes?: string | null;
+}
+
+export interface WatchlistDataCollectionResult {
+  ticker: string;
+  asset_ensured: boolean;
+  price_collected: boolean;
+  fundamentals_collected: boolean;
+  lg_score: string | null;
+  conviction_score: string | null;
+  confidence: string | null;
+  low_confidence: boolean;
+  notes: string[];
+}
+
+export interface WatchlistCollectAllResult {
+  results: WatchlistDataCollectionResult[];
+}
+
+export interface RadarClassificationResult {
+  ticker: string;
+  name: string;
+  asset_class: string;
+  watchlist_status: string | null;
+  is_current_holding: boolean;
+  current_weight: string | null;
+  classification: string;
+  effective_score: string | null;
+  score_source: string | null;
+  confidence: string | null;
+  reasons: string[];
+}
+
+export interface RadarEvaluation {
+  candidates: RadarClassificationResult[];
+}
+
+async function _handleJsonResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+  return response.json();
+}
+
+export async function fetchWatchlist(portfolioId = 1): Promise<WatchlistAssetView[]> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/watchlist?portfolio_id=${portfolioId}`, {
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+  return _handleJsonResponse<WatchlistAssetView[]>(response);
+}
+
+export async function addWatchlistAsset(
+  payload: WatchlistAssetCreatePayload,
+  portfolioId = 1,
+): Promise<WatchlistAssetView> {
+  const response = await fetch(`${API_URL}/api/watchlist?portfolio_id=${portfolioId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponse<WatchlistAssetView>(response);
+}
+
+export async function updateWatchlistAsset(
+  watchlistAssetId: number,
+  payload: WatchlistAssetUpdatePayload,
+  portfolioId = 1,
+): Promise<WatchlistAssetView> {
+  const response = await fetch(
+    `${API_URL}/api/watchlist/${watchlistAssetId}?portfolio_id=${portfolioId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return _handleJsonResponse<WatchlistAssetView>(response);
+}
+
+export async function setWatchlistStatus(
+  watchlistAssetId: number,
+  status: string,
+  portfolioId = 1,
+): Promise<WatchlistAssetView> {
+  const response = await fetch(
+    `${API_URL}/api/watchlist/${watchlistAssetId}/status?portfolio_id=${portfolioId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    },
+  );
+  return _handleJsonResponse<WatchlistAssetView>(response);
+}
+
+export async function removeWatchlistAsset(
+  watchlistAssetId: number,
+  portfolioId = 1,
+): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/watchlist/${watchlistAssetId}?portfolio_id=${portfolioId}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok && response.status !== 204) {
+    throw new ApiError(response.statusText, response.status);
+  }
+}
+
+export async function collectWatchlistAssetData(
+  watchlistAssetId: number,
+  portfolioId = 1,
+): Promise<WatchlistDataCollectionResult> {
+  const response = await fetch(
+    `${API_URL}/api/watchlist/${watchlistAssetId}/collect?portfolio_id=${portfolioId}`,
+    { method: "POST" },
+  );
+  return _handleJsonResponse<WatchlistDataCollectionResult>(response);
+}
+
+export async function collectAllWatchlistData(
+  portfolioId = 1,
+): Promise<WatchlistCollectAllResult> {
+  const response = await fetch(
+    `${API_URL}/api/watchlist/collect-all?portfolio_id=${portfolioId}`,
+    { method: "POST" },
+  );
+  return _handleJsonResponse<WatchlistCollectAllResult>(response);
+}
+
+export async function fetchRadarEvaluation(portfolioId = 1): Promise<RadarEvaluation> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/radar?portfolio_id=${portfolioId}`, {
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+  return _handleJsonResponse<RadarEvaluation>(response);
+}

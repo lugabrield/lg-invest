@@ -17,7 +17,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api.routes import aporte, ativos, dashboard, intelligence, portfolio, system
+from backend.app.api.routes import aporte, ativos, dashboard, intelligence, portfolio, radar, system
 from backend.app.core.config import settings
 
 app = FastAPI(
@@ -40,3 +40,4 @@ app.include_router(aporte.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
 app.include_router(intelligence.router, prefix="/api")
 app.include_router(ativos.router, prefix="/api")
+app.include_router(radar.router, prefix="/api")
