@@ -1212,3 +1212,137 @@ export async function runSimulation(
   }
   return response.json();
 }
+
+// --- Journal (v1.1, Fase 9) — espelha 1:1 backend/app/schemas/journal_bundle.py
+// (JournalEntryView, ThesisView, ThesisReviewView). Journal e teses não são
+// escopados por portfolio_id (mesmo comportamento do Streamlit) — só por
+// ticker/asset_id. Nenhuma regra de ciclo de vida de tese (status inicial
+// "open", transição por classificação de revisão) é recalculada aqui, tudo
+// já vem pronto da API.
+
+export interface JournalEntryView {
+  id: number;
+  date: string;
+  asset_id: number;
+  ticker: string;
+  action: string;
+  thesis: string;
+  expected_outcome: string | null;
+}
+
+export interface JournalEntryCreatePayload {
+  ticker: string;
+  action: string;
+  date: string;
+  thesis: string;
+  expected_outcome?: string | null;
+}
+
+export interface ThesisView {
+  id: number;
+  asset_id: number;
+  ticker: string;
+  thesis_date: string;
+  status: string;
+  entry_price: string | null;
+  hypothesis: string;
+  return_drivers: string | null;
+  main_risks: string | null;
+  horizon: string | null;
+  review_criteria: string | null;
+}
+
+export interface ThesisCreatePayload {
+  ticker: string;
+  thesis_date: string;
+  hypothesis: string;
+  entry_price?: string | null;
+  return_drivers?: string | null;
+  main_risks?: string | null;
+  horizon?: string | null;
+  review_criteria?: string | null;
+}
+
+export interface ThesisReviewView {
+  id: number;
+  thesis_id: number;
+  review_date: string;
+  classification: string;
+  notes: string | null;
+}
+
+export interface ThesisReviewCreatePayload {
+  review_date: string;
+  classification: string;
+  notes?: string | null;
+}
+
+async function _handleJsonResponseJournal<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+  return response.json();
+}
+
+export async function fetchJournalEntries(): Promise<JournalEntryView[]> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/journal`, { cache: "no-store" });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+  return _handleJsonResponseJournal<JournalEntryView[]>(response);
+}
+
+export async function createJournalEntry(
+  payload: JournalEntryCreatePayload,
+): Promise<JournalEntryView> {
+  const response = await fetch(`${API_URL}/api/journal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseJournal<JournalEntryView>(response);
+}
+
+export async function fetchTheses(): Promise<ThesisView[]> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/theses`, { cache: "no-store" });
+  } catch {
+    throw new ApiError(
+      `Não foi possível conectar à API em ${API_URL}. Ela está rodando? (uvicorn backend.app.api.app:app --reload --port 8000)`,
+    );
+  }
+  return _handleJsonResponseJournal<ThesisView[]>(response);
+}
+
+export async function createThesis(payload: ThesisCreatePayload): Promise<ThesisView> {
+  const response = await fetch(`${API_URL}/api/theses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseJournal<ThesisView>(response);
+}
+
+export async function createThesisReview(
+  thesisId: number,
+  payload: ThesisReviewCreatePayload,
+): Promise<ThesisReviewView> {
+  const response = await fetch(`${API_URL}/api/theses/${thesisId}/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseJournal<ThesisReviewView>(response);
+}

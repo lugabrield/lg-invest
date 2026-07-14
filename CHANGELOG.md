@@ -4,6 +4,29 @@ Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
 
+## [Unreleased] - v1.1 Premium Web App — Fase 9 (Journal real no Next.js)
+
+### Contexto
+Autorizado pelo usuário ("pode continuar") logo após validar a Fase 8 (Simulação) rodando localmente. Leva a oitava tela do Next.js ao ar: Journal. Consome `JournalService` (diário) e `ThesisService` (teses/revisões) — Investment Memory & Journal Engine (Volume 12) — exatamente como `pages_impl/journal.py` já fazia. Nenhum cálculo financeiro vive aqui: o ciclo de vida de uma tese (nasce "open", muda de status só via revisão, histórico de revisões nunca é apagado) é 100% do `ThesisService`. Diferente do restante da migração, Journal e teses não são escopados por `portfolio_id` — os modelos só têm `asset_id`, mesmo comportamento do Streamlit.
+
+### Adicionado
+- `backend/app/schemas/journal_bundle.py` — `JournalEntryView`/`ThesisView`/`ThesisReviewView` (acrescentam o `ticker` do ativo, resolvido via `AssetRepository`, aos schemas 1:1 já existentes `JournalEntryRead`/`ThesisRead`/`ThesisReviewRead`) e os payloads por ticker `JournalEntryCreateByTicker`, `ThesisCreateByTicker`, `ThesisReviewCreateRequest`.
+- `backend/app/api/routes/journal.py` — 5 endpoints: `GET /api/journal` (lista com ticker resolvido), `POST /api/journal` (cria por ticker, 404 se ativo desconhecido, 422 se `action` inválida), `GET /api/theses` (lista), `POST /api/theses` (cria por ticker, sempre nasce "open", 404 se ativo desconhecido), `POST /api/theses/{id}/reviews` (cria revisão imutável e atualiza o status da tese conforme a classificação, 404 se tese desconhecida, 422 se `classification` inválida).
+- `backend/tests/unit/test_api_journal.py` (10 testes) — contrato/wiring: lista vazia por padrão, criação resolve o ticker certo (normalizado para maiúsculas) e rejeita action/classification inválidas, 404 para ticker/tese desconhecidos, revisão "confirmed" atualiza o status da tese refletido na listagem seguinte (mesma regra de `test_thesis_service.py`).
+- `frontend-next/lib/api.ts` — `JournalEntryView`, `JournalEntryCreatePayload`, `ThesisView`, `ThesisCreatePayload`, `ThesisReviewView`, `ThesisReviewCreatePayload` (espelham 1:1 os schemas Pydantic) + `fetchJournalEntries()`, `createJournalEntry()`, `fetchTheses()`, `createThesis()`, `createThesisReview()`.
+- `frontend-next/lib/adapt-journal.ts` — rótulos em pt-BR de `JOURNAL_ACTIONS`, `THESIS_STATUSES` (+ cor semântica por status) e `REVIEW_CLASSIFICATIONS`, mesmo vocabulário de `pages_impl/journal.py`.
+- `frontend-next/components/journal-diary-panel.tsx` (client) — aba "Diário": formulário de nova entrada + histórico em tabela.
+- `frontend-next/components/journal-thesis-panel.tsx` (client) — aba "Teses": formulário de nova tese (sempre nasce "open") + tabela de teses registradas com badge de status.
+- `frontend-next/components/journal-review-panel.tsx` (client) — aba "Revisões": escolhe uma tese existente e registra uma revisão; `router.refresh()` traz o status atualizado.
+- `frontend-next/components/journal-tabs.tsx` (client) — mesmas 3 abas do Streamlit (`st.tabs(["Diário", "Teses", "Revisões"])`), compõe os 3 painéis acima.
+- `frontend-next/app/journal/page.tsx` — server component: busca ativos + entradas de diário + teses em paralelo; empty state "Nenhum ativo cadastrado" igual ao Streamlit quando não há nenhum ativo.
+- `frontend-next/components/sidebar.tsx` — item "Journal" passa de `href="#"` para `href="/journal"`.
+
+### Deixado de fora (fases seguintes)
+- Configurações, Dividendos.me continuam só no Streamlit.
+- Nenhuma mudança em `backend/app/engines` ou `backend/app/services`.
+- `npm run build` não pôde ser verificado de ponta a ponta neste sandbox (proxy bloqueia o fetch da fonte Inter no Google Fonts) — `typecheck` e `lint` rodaram limpos; build de produção deve ser conferido localmente.
+
 ## [Unreleased] - v1.1 Premium Web App — Fase 8 (Simulação real no Next.js)
 
 ### Contexto
