@@ -1346,3 +1346,315 @@ export async function createThesisReview(
   });
   return _handleJsonResponseJournal<ThesisReviewView>(response);
 }
+
+// --- Configurações (v1.1, Fase 10) — espelha 1:1
+// backend/app/schemas/configuracoes_bundle.py, investment_policy.py,
+// target_allocation.py, simulation.py e market_data.py. Câmbio, preços,
+// alocação-alvo (3 camadas) e premissas do Monte Carlo — nenhum cálculo
+// de precedência/conflito/limite acontece aqui, tudo já vem pronto da
+// API (`GET /api/configuracoes/visao-geral`).
+
+export interface SystemInfoView {
+  environment: string;
+  database_url_redacted: string;
+  portfolio_id: number;
+  assets_count: number;
+}
+
+export interface FxQuoteView {
+  pair: string;
+  rate: string;
+  source: string;
+  fetched_at: string;
+}
+
+export interface FxStatusView {
+  current_rate: string;
+  quote: FxQuoteView | null;
+}
+
+export interface UpdateResultView {
+  ticker: string;
+  inserted: number;
+  updated: number;
+  rejected: number;
+  skipped_manual: boolean;
+  error: string | null;
+}
+
+export interface BatchUpdateResultView {
+  results: UpdateResultView[];
+}
+
+export interface SimpleAllocationView {
+  allocation: Record<string, string>;
+  has_target: boolean;
+}
+
+export interface AllocationPresetView {
+  key: string;
+  label: string;
+  description: string;
+  allocation: Record<string, string> | null;
+}
+
+export interface TargetAllocationRuleView {
+  id: number;
+  portfolio_id: number;
+  dimension_type: string;
+  dimension_key: string;
+  min_weight: string | null;
+  target_weight: string | null;
+  max_weight: string | null;
+  priority: number;
+}
+
+export interface TargetAllocationRuleUpsertPayload {
+  dimension_type: string;
+  dimension_key: string;
+  min_weight?: string | null;
+  target_weight?: string | null;
+  max_weight?: string | null;
+  priority?: number;
+}
+
+export interface InvestmentPolicyView {
+  portfolio_id: number;
+  investor_profile: string;
+  horizon_years: number;
+  base_currency: string;
+  risk_tolerance: string;
+  max_asset_weight: string;
+  max_crypto_weight: string;
+  target_international_min: string;
+  target_international_max: string;
+  target_fii_max: string;
+  target_brazil_equity: string;
+  target_us_equity: string;
+  target_etf: string;
+  target_reit: string;
+  target_fixed_income: string;
+  rebalance_threshold: string;
+  monthly_contribution_default: string;
+  notes: string | null;
+}
+
+export type InvestmentPolicyUpdatePayload = Partial<Omit<InvestmentPolicyView, "portfolio_id">>;
+
+export interface EffectiveLimitView {
+  dimension_type: string;
+  dimension_key: string;
+  max_weight: string;
+  source: string;
+  overridden_policy_value: string | null;
+}
+
+export interface AllocationConflictView {
+  kind: string;
+  message: string;
+}
+
+export interface AllocationOverviewView {
+  effective_limits: EffectiveLimitView[];
+  conflicts: AllocationConflictView[];
+}
+
+export interface ClassAssumptionView {
+  asset_class: string;
+  expected_return: string;
+  volatility: string;
+  source: string;
+}
+
+export interface SimulationAssumptionsView {
+  assumptions: ClassAssumptionView[];
+  disclaimer: string;
+}
+
+export interface SimulationAssumptionUpdatePayload {
+  asset_class: string;
+  expected_return: string;
+  volatility: string;
+}
+
+async function _handleJsonResponseConfig<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json();
+}
+
+export async function fetchSystemInfo(portfolioId = 1): Promise<SystemInfoView> {
+  const response = await fetch(`${API_URL}/api/configuracoes/sistema?portfolio_id=${portfolioId}`, {
+    cache: "no-store",
+  });
+  return _handleJsonResponseConfig<SystemInfoView>(response);
+}
+
+export async function fetchFxStatus(): Promise<FxStatusView> {
+  const response = await fetch(`${API_URL}/api/configuracoes/fx`, { cache: "no-store" });
+  return _handleJsonResponseConfig<FxStatusView>(response);
+}
+
+export async function refreshFxRate(): Promise<FxQuoteView> {
+  const response = await fetch(`${API_URL}/api/configuracoes/fx/refresh`, { method: "POST" });
+  return _handleJsonResponseConfig<FxQuoteView>(response);
+}
+
+export async function setFxRateManually(rate: string): Promise<FxStatusView> {
+  const response = await fetch(`${API_URL}/api/configuracoes/fx`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rate }),
+  });
+  return _handleJsonResponseConfig<FxStatusView>(response);
+}
+
+export async function refreshPrices(): Promise<BatchUpdateResultView> {
+  const response = await fetch(`${API_URL}/api/configuracoes/precos/refresh`, { method: "POST" });
+  return _handleJsonResponseConfig<BatchUpdateResultView>(response);
+}
+
+export async function fetchSimpleAllocation(): Promise<SimpleAllocationView> {
+  const response = await fetch(`${API_URL}/api/configuracoes/alocacao-simples`, {
+    cache: "no-store",
+  });
+  return _handleJsonResponseConfig<SimpleAllocationView>(response);
+}
+
+export async function setSimpleAllocation(
+  allocation: Record<string, string>,
+): Promise<SimpleAllocationView> {
+  const response = await fetch(`${API_URL}/api/configuracoes/alocacao-simples`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ allocation }),
+  });
+  return _handleJsonResponseConfig<SimpleAllocationView>(response);
+}
+
+export async function clearSimpleAllocation(): Promise<void> {
+  const response = await fetch(`${API_URL}/api/configuracoes/alocacao-simples`, {
+    method: "DELETE",
+  });
+  await _handleJsonResponseConfig<void>(response);
+}
+
+export async function fetchAllocationPresets(): Promise<AllocationPresetView[]> {
+  const response = await fetch(`${API_URL}/api/configuracoes/alocacao-presets`, {
+    cache: "no-store",
+  });
+  return _handleJsonResponseConfig<AllocationPresetView[]>(response);
+}
+
+export async function applyAllocationPreset(presetKey: string): Promise<SimpleAllocationView> {
+  const response = await fetch(
+    `${API_URL}/api/configuracoes/alocacao-presets/${encodeURIComponent(presetKey)}/aplicar`,
+    { method: "POST" },
+  );
+  return _handleJsonResponseConfig<SimpleAllocationView>(response);
+}
+
+export async function fetchTargetAllocationRules(
+  portfolioId = 1,
+): Promise<TargetAllocationRuleView[]> {
+  const response = await fetch(
+    `${API_URL}/api/configuracoes/regras-alocacao?portfolio_id=${portfolioId}`,
+    { cache: "no-store" },
+  );
+  return _handleJsonResponseConfig<TargetAllocationRuleView[]>(response);
+}
+
+export async function upsertTargetAllocationRule(
+  payload: TargetAllocationRuleUpsertPayload,
+  portfolioId = 1,
+): Promise<TargetAllocationRuleView> {
+  const response = await fetch(
+    `${API_URL}/api/configuracoes/regras-alocacao?portfolio_id=${portfolioId}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return _handleJsonResponseConfig<TargetAllocationRuleView>(response);
+}
+
+export async function deleteTargetAllocationRule(
+  dimensionType: string,
+  dimensionKey: string,
+  portfolioId = 1,
+): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/configuracoes/regras-alocacao/${encodeURIComponent(dimensionType)}/${encodeURIComponent(dimensionKey)}?portfolio_id=${portfolioId}`,
+    { method: "DELETE" },
+  );
+  await _handleJsonResponseConfig<void>(response);
+}
+
+export async function fetchInvestmentPolicy(portfolioId = 1): Promise<InvestmentPolicyView> {
+  const response = await fetch(
+    `${API_URL}/api/configuracoes/politica?portfolio_id=${portfolioId}`,
+    { cache: "no-store" },
+  );
+  return _handleJsonResponseConfig<InvestmentPolicyView>(response);
+}
+
+export async function updateInvestmentPolicy(
+  payload: InvestmentPolicyUpdatePayload,
+  portfolioId = 1,
+): Promise<InvestmentPolicyView> {
+  const response = await fetch(
+    `${API_URL}/api/configuracoes/politica?portfolio_id=${portfolioId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return _handleJsonResponseConfig<InvestmentPolicyView>(response);
+}
+
+export async function fetchAllocationOverview(portfolioId = 1): Promise<AllocationOverviewView> {
+  const response = await fetch(
+    `${API_URL}/api/configuracoes/visao-geral?portfolio_id=${portfolioId}`,
+    { cache: "no-store" },
+  );
+  return _handleJsonResponseConfig<AllocationOverviewView>(response);
+}
+
+export async function fetchSimulationAssumptions(): Promise<SimulationAssumptionsView> {
+  const response = await fetch(`${API_URL}/api/configuracoes/premissas-simulacao`, {
+    cache: "no-store",
+  });
+  return _handleJsonResponseConfig<SimulationAssumptionsView>(response);
+}
+
+export async function setSimulationAssumption(
+  payload: SimulationAssumptionUpdatePayload,
+): Promise<SimulationAssumptionsView> {
+  const response = await fetch(`${API_URL}/api/configuracoes/premissas-simulacao`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseConfig<SimulationAssumptionsView>(response);
+}
+
+export async function resetSimulationAssumption(
+  assetClass: string,
+): Promise<SimulationAssumptionsView> {
+  const response = await fetch(
+    `${API_URL}/api/configuracoes/premissas-simulacao/${encodeURIComponent(assetClass)}`,
+    { method: "DELETE" },
+  );
+  return _handleJsonResponseConfig<SimulationAssumptionsView>(response);
+}

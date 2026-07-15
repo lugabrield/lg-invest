@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api.routes import (
     aporte,
     ativos,
+    configuracoes,
     dashboard,
     intelligence,
     journal,
@@ -53,3 +54,4 @@ app.include_router(ativos.router, prefix="/api")
 app.include_router(radar.router, prefix="/api")
 app.include_router(simulacao.router, prefix="/api")
 app.include_router(journal.router, prefix="/api")
+app.include_router(configuracoes.router, prefix="/api")

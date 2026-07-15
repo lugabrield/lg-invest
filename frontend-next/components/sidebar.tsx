@@ -18,8 +18,8 @@ import { cn } from "@/lib/utils";
 // Mesmos 3 grupos já validados no Streamlit (Sprint 30): Principal,
 // Análise, Operação — mantidos aqui para não reaprender a navegação.
 // Telas ainda não migradas para o Next.js ficam com `href: "#"` até sua
-// própria fase chegar (Fase 9 entrega Dashboard + Aporte + Carteira +
-// Inteligência + Ativos + Radar + Simulação + Journal).
+// própria fase chegar. Fase 10 entrega Configurações — resta apenas
+// Sincronizar Dividendos.me ainda só no Streamlit.
 const NAV_GROUPS = [
   {
     label: "Principal",
@@ -43,7 +43,7 @@ const NAV_GROUPS = [
     label: "Operação",
     items: [
       { label: "Sincronizar Dividendos.me", icon: RefreshCcw, href: "#" },
-      { label: "Configurações", icon: Settings, href: "#" },
+      { label: "Configurações", icon: Settings, href: "/configuracoes" },
     ],
   },
 ];
