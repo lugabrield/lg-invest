@@ -4,6 +4,15 @@
 > (branch `feature/v1.1-premium-web-app`). Ver `docs/V1_1_MIGRATION_PLAN.md`
 > para o plano por fases e `docs/API_CONTRACT.md` para o contrato dos
 > endpoints.
+>
+> **Status (14/07/2026 — Release Candidate v1.1.0-rc1):** as decisões
+> abaixo foram tomadas na Fase 0 (planejamento) e todas foram
+> implementadas exatamente como descrito ao longo das 11 fases da
+> migração — nenhuma foi revertida ou substituída. As seções que
+> originalmente diziam "a construir" ou "a decidir" foram atualizadas
+> para refletir o estado final. Ver `docs/RELEASE_NOTES_v1.1.md` para o
+> resumo da RC e `docs/VERCEL_DEPLOYMENT.md` (agora existente) para o
+> guia de deploy.
 
 ## Resumo da decisão
 
@@ -58,15 +67,25 @@ browser automation no backend.
   internamente), então já está pronto para receber credenciais vindas
   de uma requisição HTTP sem nenhuma mudança de assinatura.
 - Alembic, migrations, modelos SQLAlchemy.
-- Toda a suíte de 1213 testes de `backend/tests/`.
+- Toda a suíte de testes de `backend/tests/` (1213 no início da migração,
+  **1331 ao fechar a RC v1.1.0-rc1** — o crescimento é só os novos testes
+  de contrato das rotas FastAPI descritos abaixo, nenhum teste de engine/
+  service existente mudou de comportamento).
 
-**Novo (a construir):**
-- `apps/api` (ou `backend/api`) — camada FastAPI fina: rotas, DI de
-  sessão de banco, serialização, tratamento de erro HTTP. Zero regra de
-  negócio nova.
-- `frontend-next/` — o app Next.js.
-- Testes de API (contrato/serialização) e testes de componente no
-  frontend.
+**Novo (implementado nas 11 fases da migração):**
+- `backend/app/api/` — camada FastAPI fina: 10 routers (`dashboard`,
+  `system`, `aporte`, `portfolio`, `intelligence`, `ativos`, `radar`,
+  `simulacao`, `journal`, `configuracoes`, `dividendos_me`), DI de sessão
+  de banco (`backend/app/api/deps.py`), serialização via os schemas
+  Pydantic já existentes, tratamento de erro HTTP padronizado. Zero regra
+  de negócio nova — confirmado pela auditoria da RC (item 2 da revisão
+  final).
+- `frontend-next/` — o app Next.js (App Router + TypeScript + Tailwind),
+  com as 11 telas do plano de migração.
+- Testes de API (`backend/tests/unit/test_api_*.py`, um arquivo por
+  router, usando `fastapi.testclient.TestClient`) cobrindo contrato,
+  serialização, códigos de erro HTTP e — no caso de Dividendos.me —
+  sanitização de credenciais na resposta.
 
 **Fica para depois (fora do escopo da v1.1, conforme pedido do usuário):**
 - Autenticação multiusuário — v1.1 continua single-user, protegida por
@@ -136,9 +155,10 @@ código Python — toda leitura/escrita passa pela API.
 
 1. **Cold start do backend em serviços gratuitos** (Render free tier
    "dorme" após inatividade) — primeira requisição depois de um tempo
-   parado pode levar ~30s. Mitigação: documentar isso claramente
-   (`docs/VERCEL_DEPLOYMENT.md`, a escrever na Fase 9) e considerar um
-   plano pago baixo custo se o cold start incomodar no uso real.
+   parado pode levar ~30s. Mitigação: documentado em
+   `docs/VERCEL_DEPLOYMENT.md` (criado no fechamento da RC v1.1.0-rc1);
+   considerar um plano pago baixo custo se o cold start incomodar no uso
+   real.
 2. **Playwright em produção é a parte mais frágil já hoje** (dependente
    de o Dividendos.me não mudar a estrutura da página) — isso não piora
    com a migração, mas também não melhora sozinho; a Fase 8 do plano
@@ -159,13 +179,18 @@ código Python — toda leitura/escrita passa pela API.
 
 ## Como os testes atuais são preservados
 
-- Nenhum arquivo em `backend/tests/` muda de comportamento — a suíte de
-  1213 testes continua rodando exatamente como está, validando
-  engines/services independentemente de qual frontend os consome.
-- Novos testes de API (Fase 2 em diante) vivem em
-  `backend/tests/api/` (ou `backend/tests/unit/test_api_*.py`, a
-  decidir na Fase 2), usando `fastapi.testclient.TestClient` — mesma
-  fixture `db_session` já usada pelos testes de service.
-- Novos testes de frontend (Next.js) vivem em `frontend-next/` com
-  Vitest/Testing Library (ou Playwright para e2e, se fizer sentido mais
-  adiante) — não competem nem duplicam os testes Python.
+- Nenhum arquivo pré-existente em `backend/tests/` mudou de
+  comportamento — confirmado na validação final da RC (`pytest -q`:
+  1331 testes, 0 falhas; `ruff check .` e `black --check .` limpos),
+  validando engines/services independentemente de qual frontend os
+  consome.
+- Os testes de API vivem em `backend/tests/unit/test_api_*.py`, um
+  arquivo por router (ex.: `test_api_dividendos_me.py`, 23 testes),
+  usando `fastapi.testclient.TestClient` — mesma fixture `db_session`
+  já usada pelos testes de service.
+- O frontend Next.js foi validado nesta RC via `npm run typecheck` e
+  `npm run lint` (ambos limpos) — testes automatizados de componente
+  (Vitest/Testing Library) e e2e (Playwright) ficam como melhoria
+  futura, fora do escopo desta migração (a cobertura de comportamento
+  real está nos testes de API + engines, que já validam toda a lógica
+  que o frontend consome).

@@ -4,6 +4,59 @@ Todas as mudanças relevantes da LG INVEST são registradas aqui.
 O formato segue, de forma simplificada, o padrão Keep a Changelog.
 
 
+## [Unreleased] - v1.1.0-rc1 — Release Candidate (fechamento da migração Streamlit → Next.js)
+
+### Contexto
+Autorizado pelo usuário ("Visual validado. Achei bom. Agora quero fechar a v1.1 como Release Candidate.") logo após validar visualmente a Fase 11 (Dividendos.me) rodando localmente. Esta entrada fecha o ciclo de migração completo — as 11 fases do `docs/V1_1_MIGRATION_PLAN.md` (scaffolding/API + Dashboard, Aporte v3, Carteira, Inteligência, Ativos, Radar, Simulação, Journal, Configurações, Dividendos.me) — com uma rodada de validação final, auditoria de dados reais vs. mock e atualização de toda a documentação de release. **Nenhuma engine, regra de negócio ou schema mudou nesta rodada** — é fechamento, não desenvolvimento novo, seguindo o mesmo espírito de freeze de features já usado no fechamento da v1.0.0.
+
+### Validação final
+
+Suíte Python completa (rsync limpo para `/tmp`, fora do mount, com `PYTHONPATH` explícito):
+```bash
+python -m pytest -q          # 1331 testes, 0 falhas
+python -m ruff check .        # All checks passed!
+python -m black --check .     # 463 arquivos, sem mudanças necessárias
+```
+
+Frontend Next.js (rsync limpo excluindo `node_modules`/`.next`, `npm install` limpo):
+```bash
+npm run typecheck   # tsc --noEmit — sem erros
+npm run lint         # sem erros nem warnings
+npm run build        # falha SOMENTE no fetch de fonte do Google Fonts (next/font/google,
+                      # Inter, em app/layout.tsx) — limitação de rede do sandbox de
+                      # validação, sem acesso à internet externa; não reflete um bug do
+                      # código. Em qualquer ambiente com acesso normal à internet (dev
+                      # local do usuário, Vercel), o build completa normalmente.
+```
+
+### Auditoria de dados reais vs. mock (item 2 da RC)
+
+Revisão sistemática das 11 telas Next.js confirmando que cada uma consome as funções reais de `lib/api.ts` contra o FastAPI, sem dado mockado renderizado:
+
+- Dashboard, Carteira, Aporte, Inteligência, Ativos, Radar, Journal, Configurações e Dividendos.me chamam a API real ao montar a tela.
+- Simulação é por design a única tela que só chama a API mediante clique explícito do usuário (parâmetros de simulação escolhidos antes de rodar o Monte Carlo) — comportamento idêntico ao Streamlit, não um resíduo de mock.
+- `frontend-next/lib/mock/dashboard.ts` — único arquivo remanescente sob `lib/mock/` — foi auditado linha a linha: continha 5 interfaces/tipos TypeScript (`StatusKind`, `KpiMock`, `AllocationSliceMock`, `TopPositionMock`, `InsightMock`) legitimamente reusadas como tipos de apresentação por `lib/adapt-dashboard.ts` e por 8 componentes (`AlertCard`, `AssetTable`, `DataCoveragePanel`, `DonutChartCard`, `MetricCard`, `ProgressBar`, `RecommendationCard`, `StatusBadge`), além de um bloco de constantes `export const` (dados de exemplo da Fase 1, protótipo visual) que não era mais importado em lugar nenhum. Removido o bloco morto, mantidos só os tipos — comentário de cabeçalho do arquivo atualizado para deixar claro que é um módulo de tipos compartilhados, não uma fonte de dados mockados.
+
+### Atualizado — Documentação
+
+- `docs/RELEASE_NOTES_v1.1.md` (novo) — resumo da versão, escopo completo, como rodar localmente, riscos conhecidos, próximos passos (deploy/tag/merge — documentados, não executados).
+- `docs/V1_1_RC_CHECKLIST.md` (novo) — checklist de prontidão da RC, um item por tela/componente (Dashboard, Carteira, Aporte v3, Inteligência, Ativos, Radar, Simulação, Journal, Configurações, Dividendos.me, FastAPI, Supabase/Postgres, Streamlit legado intacto), no mesmo formato do `docs/RELEASE_CHECKLIST.md` da v1.0.0.
+- `docs/WEB_APP_ARCHITECTURE.md` — atualizado de "documento de decisão" (estado planejado na Fase 0) para refletir o estado final implementado (11 telas, 10 routers FastAPI, contagem de testes atualizada).
+- `docs/VERCEL_DEPLOYMENT.md` (novo) — guia de deploy do `frontend-next/` na Vercel e do backend FastAPI em um serviço long-running (Render/Fly/Railway), incluindo variáveis de ambiente e o cuidado com CORS.
+- `docs/API_CONTRACT.md` — seções de Journal e Configurações (antes marcadas "a detalhar") preenchidas com os endpoints finais implementados; seção de Dividendos.me expandida com os 4 endpoints de proventos (`income/monthly/*`, `income/calendar/*`) e o endpoint `GET /status` adicionados na Fase 11.
+- `README.md` — badge de status atualizado para deixar claro que v1.1 (Next.js + FastAPI) existe como Release Candidate em branch separada, com Streamlit v1.0.0 continuando como o app padrão em `main`.
+
+### Estado dos branches (confirmado nesta RC)
+
+- `main` — continua exatamente v1.0.0 (`git diff --stat v1.0.0 main` vazio: árvore idêntica à tag `v1.0.0`), nenhum commit de migração tocou esse branch.
+- `feature/v1.1-premium-web-app` — as 11 fases da migração commitadas de forma incremental, RC-ready para revisão do usuário.
+- Nenhum merge para `main` e nenhuma tag foram criados nesta rodada — por decisão explícita do usuário ("Não fazer merge no main ainda. Não criar tag ainda."), esta RC fica pronta só para revisão.
+
+### Riscos conhecidos (herdados, sem mudança nesta rodada)
+- Playwright (Dividendos.me) segue sendo a parte mais frágil da integração — sem mudança de comportamento nesta RC.
+- Cold start do backend em serviços gratuitos (Render free tier) — documentado em `docs/VERCEL_DEPLOYMENT.md`.
+- v1.1 continua single-user/single-portfolio, sem autenticação multiusuário — mesma decisão de escopo do `docs/WEB_APP_ARCHITECTURE.md` desde a Fase 0.
+
 ## [Unreleased] - v1.1 Premium Web App — Fase 11 (Dividendos.me real no Next.js — última fase)
 
 ### Contexto

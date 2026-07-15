@@ -1,11 +1,21 @@
-# Contrato Inicial da API — LG INVEST v1.1
+# Contrato da API — LG INVEST v1.1
 
-> Contrato de referência para o FastAPI (`backend/app/api/`, a criar na
-> Fase 2). Todos os endpoints são camada fina sobre `services/*`
-> existentes — nenhum cálculo novo, nenhuma regra nova. Response models
-> derivam diretamente dos schemas Pydantic já existentes em
-> `backend/app/schemas/*`; onde o schema já existe, ele é reaproveitado
-> como `response_model` quase sem alteração.
+> Contrato de referência para o FastAPI (`backend/app/api/`). Todos os
+> endpoints são camada fina sobre `services/*` existentes — nenhum
+> cálculo novo, nenhuma regra nova. Response models derivam diretamente
+> dos schemas Pydantic já existentes em `backend/app/schemas/*`; onde o
+> schema já existe, ele é reaproveitado como `response_model` quase sem
+> alteração.
+>
+> **Status (14/07/2026 — Release Candidate v1.1.0-rc1):** este contrato
+> foi escrito na Fase 0 (planejamento) e evoluiu junto com cada fase da
+> migração. As seções de Journal e Configurações, que na versão inicial
+> deste documento estavam marcadas "a detalhar", agora refletem os
+> endpoints finais implementados nas Fases 9 e 10. A seção de
+> Dividendos.me foi expandida com os endpoints de proventos e status
+> adicionados na Fase 11. Os 10 routers abaixo estão todos registrados
+> em `backend/app/api/app.py` e cobertos por testes de contrato em
+> `backend/tests/unit/test_api_*.py`.
 
 ## Convenções
 
@@ -16,8 +26,9 @@
   depois.
 - Erros seguem o formato padrão do FastAPI:
   `{"detail": "mensagem amigável, nunca stack trace"}`, com status HTTP
-  apropriado (400 validação, 404 não encontrado, 409 conflito/precisa
-  confirmação, 502 falha de fonte externa, 500 erro genérico).
+  apropriado (400/422 validação, 404 não encontrado, 401 credenciais
+  inválidas, 409 conflito/precisa confirmação, 503 falha de fonte
+  externa, 500 erro genérico).
 - Valores monetários serializados como string decimal (não float) para
   não perder precisão — mesma convenção que os schemas Pydantic já
   usam com `Decimal`.
@@ -109,8 +120,8 @@ Body:
 ```
 Mapeia 1:1 para `DecisionService.recommend_v3(portfolio_id, amount,
 blocked, config, persist, allow_watchlist_candidates)`. `persist`
-default `false` na API pública (o Streamlit também não persiste por
-padrão na tela — confirmar comportamento exato na Fase 3).
+default `false` na API pública (mesmo comportamento do Streamlit: a
+tela não persiste por padrão).
 
 Response → `RecommendationResult` serializado quase direto:
 ```jsonc
@@ -140,23 +151,102 @@ Body:
 ```
 → `SimulationResultView` (via `SimulationService.run_portfolio_simulation`).
 
-## Configurações
+## Journal (Fase 9 — implementado)
 
-### `GET /api/settings?portfolio_id=1`
-→ agrega alocação-alvo (simples + regras detalhadas), política de
-investimento, premissas de simulação, câmbio manual — mesma composição
-de `allocation_overview_service.build_allocation_overview` + os demais
-services de Configurações.
+Diário de decisões e teses de investimento. Sem escopo por
+`portfolio_id` (os modelos `JournalEntry`/`InvestmentThesis` têm só
+`asset_id`, não `portfolio_id`) — mesmo comportamento do Streamlit, que
+também nunca filtrou por carteira aqui. Cada view acrescenta o
+`ticker` do ativo (via `AssetRepository`) ao que `JournalService`/
+`ThesisService` já devolvem — nenhum cálculo novo.
 
-### `PATCH /api/settings/allocation`
-Body: alvo simples por classe ou regra detalhada (schema a definir na
-Fase 5 com base em `TargetAllocationRuleService`).
+### `GET /api/journal`
+→ lista de `JournalEntryView` (todas as entradas, mais recentes
+primeiro — via `JournalService.list_all`).
 
-### `PATCH /api/settings/policy`
-Body: `InvestmentPolicyUpdate`.
+### `POST /api/journal`
+Body: `JournalEntryCreateByTicker` (`ticker`, `action`, `thesis`, `date`,
+`expected_outcome`).
+→ `JournalEntryView` criado. 404 se o ticker não existir na carteira.
 
-### `PATCH /api/settings/simulation-assumptions`
-Body: premissas por classe (`SimulationAssumptionUpdate`).
+### `GET /api/theses`
+→ lista de `ThesisView` (via `ThesisService.list_theses`).
+
+### `POST /api/theses`
+Body: `ThesisCreateByTicker` (`ticker`, `thesis_date`, `hypothesis`,
+`entry_price`, `return_drivers`, `main_risks`, `horizon`,
+`review_criteria`).
+→ `ThesisView` criado. 404 se o ticker não existir.
+
+### `POST /api/theses/{thesis_id}/reviews`
+Body: `ThesisReviewCreateRequest` (`review_date`, `classification`,
+`notes`).
+→ `ThesisReviewView` criado. 404 se a tese não existir.
+
+## Configurações (Fase 10 — implementado)
+
+Todos os endpoints sob o prefixo `/api/configuracoes`, organizados
+pelas mesmas 3 camadas de alocação-alvo do Streamlit (simples/regras
+detalhadas/política), mais câmbio, sistema e premissas de simulação.
+Composição fina sobre `fx_settings_service`/`fx_service`,
+`market_data_service`, `target_allocation_settings_service`/
+`allocation_presets_service` (Camada 1), `TargetAllocationRuleService`
+(Camada 2), `InvestmentPolicyService` (Camada 3),
+`allocation_overview_service` (precedência entre as 3 camadas) e
+`simulation_assumptions_service`. Nenhuma regra de negócio nova.
+
+### Sistema e câmbio
+- `GET /api/configuracoes/sistema` → `SystemInfoView` (ambiente,
+  `DATABASE_URL` com credenciais mascaradas, `portfolio_id`, contagem
+  de ativos).
+- `GET /api/configuracoes/fx` → `FxStatusView` (taxa atual + última
+  cotação).
+- `POST /api/configuracoes/fx/refresh` → busca uma cotação nova (BCB
+  PTAX com fallback Yahoo); 503 se nenhuma fonte responder.
+- `PUT /api/configuracoes/fx` → define a taxa manualmente
+  (`FxManualUpdateRequest`); 422 se inválida.
+- `POST /api/configuracoes/precos/refresh` → `BatchUpdateResult`
+  (atualiza preços de todos os ativos ativos via Yahoo Finance); 503 se
+  a fonte estiver indisponível.
+
+### Camada 1 — alocação-alvo simples
+- `GET /api/configuracoes/alocacao-simples` → `SimpleAllocationView`.
+- `PUT /api/configuracoes/alocacao-simples` → define a alocação-alvo
+  simples por classe; 422 se não somar 100% ou for inválida.
+- `DELETE /api/configuracoes/alocacao-simples` → limpa a alocação-alvo
+  simples (204).
+- `GET /api/configuracoes/alocacao-presets` → lista de
+  `AllocationPresetView` (presets prontos).
+- `POST /api/configuracoes/alocacao-presets/{preset_key}/aplicar` →
+  aplica um preset como alocação-alvo simples; 404 se o preset não
+  existir, 422 se o preset não tiver alocação para aplicar.
+
+### Camada 2 — regras detalhadas
+- `GET /api/configuracoes/regras-alocacao?portfolio_id=1` → lista de
+  `TargetAllocationRuleView`.
+- `PUT /api/configuracoes/regras-alocacao?portfolio_id=1` → cria/atualiza
+  uma regra (`TargetAllocationRuleUpsertRequest`: `dimension_type`,
+  `dimension_key`, `min_weight`, `target_weight`, `max_weight`,
+  `priority`); 422 se inválida.
+- `DELETE /api/configuracoes/regras-alocacao/{dimension_type}/{dimension_key}?portfolio_id=1`
+  → remove uma regra (204); 404 se não existir.
+
+### Camada 3 — política de investimento
+- `GET /api/configuracoes/politica?portfolio_id=1` → `InvestmentPolicyView`
+  (cria com valores padrão se ainda não existir).
+- `PATCH /api/configuracoes/politica?portfolio_id=1` → atualiza a
+  política (`InvestmentPolicyUpdate`).
+
+### Visão geral e premissas de simulação
+- `GET /api/configuracoes/visao-geral?portfolio_id=1` → `AllocationOverview`
+  (precedência e conflitos entre as 3 camadas).
+- `GET /api/configuracoes/premissas-simulacao` → `SimulationAssumptionsView`
+  (retorno esperado/volatilidade por classe, com aviso de que são
+  premissas configuráveis, não previsão de mercado).
+- `PUT /api/configuracoes/premissas-simulacao` → define uma premissa por
+  classe (`SimulationAssumptionUpdate`); 422 se inválida.
+- `DELETE /api/configuracoes/premissas-simulacao/{asset_class}` →
+  restaura a premissa padrão daquela classe.
 
 ## Central de Dados
 
@@ -164,39 +254,77 @@ Body: premissas por classe (`SimulationAssumptionUpdate`).
 ### `POST /api/data-refresh/fundamentals?portfolio_id=1`
 ### `POST /api/data-refresh/watchlist?portfolio_id=1`
 ### `POST /api/data-refresh/all?portfolio_id=1`
-Todos via `DataRefreshService` — mesmo comportamento da tela Dashboard
-hoje. **Atenção (ver `docs/WEB_APP_ARCHITECTURE.md`, riscos):** para
-carteiras grandes isso pode demorar; considerar resposta assíncrona
-(job id + polling) em vez de request/response síncrono se o tempo
-passar de alguns segundos — decisão técnica da Fase 4/8, não fechada
-ainda.
+Todos via `DataRefreshService` — mesmo comportamento da tela Dashboard.
+Execução síncrona (request/response) — para a carteira real usada nesta
+migração (33 ativos) o tempo de resposta ficou dentro do aceitável em
+todas as fases; se o volume de ativos crescer muito, reavaliar resposta
+assíncrona (job id + polling) como melhoria futura.
 
-## Dividendos.me
+## Dividendos.me (Fase 11 — implementado)
 
 Ver `docs/DIVIDENDOS_ME_FRONT_SYNC.md` para o fluxo completo e
-`docs/SECURITY_NOTES.md` para as regras de segurança — aqui só o
-formato dos endpoints.
+`docs/SECURITY_NOTES.md` para as regras de segurança. Todos os
+endpoints sob o prefixo `/api/dividendos-me`. Diferença central em
+relação ao Streamlit: as credenciais vêm no body de cada requisição
+(nunca de `.env`/`st.secrets`), nunca são persistidas, logadas ou
+ecoadas em nenhuma resposta — cada etapa é uma chamada HTTP
+independente, sem "token de sessão" guardado em cache/Redis/memória do
+processo.
+
+### `GET /api/dividendos-me/status`
+→ `DividendosMeStatusView` (Playwright disponível no servidor + data da
+última sincronização com sucesso). Nunca depende de credenciais.
 
 ### `POST /api/dividendos-me/test-login`
-Body: `{ "email": "...", "password": "..." }` (nunca logado, nunca
-persistido — ver nota de segurança).
-→ `{ "success": true }` ou erro 401 com mensagem genérica.
+Body: `{ "email": "...", "password": "..." }`.
+→ `TestLoginResponse` (`{"success": true}`) ou 401 com mensagem
+genérica em caso de credenciais inválidas.
 
 ### `POST /api/dividendos-me/dry-run`
 Body: `{ "email": "...", "password": "...", "portfolio_id": 1 }`.
-→ `SyncPreview` (mesmo schema já usado hoje: ativos encontrados, seções
-encontradas, diff novo/atualizado/removido, alertas, status).
+→ `DryRunResponse` (embrulha `SyncPreview` + `blocking_reasons_replace`/
+`blocking_reasons_update`/`strong_alert_sections` já calculados, para o
+frontend nunca duplicar a lógica de bloqueio de segurança). 404 se a
+carteira não existir.
 
 ### `POST /api/dividendos-me/sync-update`
 Body: `{ "email": "...", "password": "...", "portfolio_id": 1, "confirm": true }`.
-→ `SyncRunResult`.
+→ `SyncRunResult`. 422 se `confirm` não vier `true`.
 
 ### `POST /api/dividendos-me/sync-replace`
-Body: `{ "email": "...", "password": "...", "portfolio_id": 1, "confirmation_phrase": "..." }`.
+Body: `{ "email": "...", "password": "...", "portfolio_id": 1, "confirmation_phrase": "SUBSTITUIR" }`.
 Exige a frase de confirmação exata (mesma trava que já existe no
-`service.py::replace` hoje) — a API só relaxa esse bloqueio se o
-service permitir, nunca no frontend.
-→ `SyncRunResult`.
+`service.py::replace`) e é bloqueado se mais de 50% da carteira seria
+removida.
+→ `SyncRunResult`. 422 se a frase não bater ou o bloqueio de segurança
+acionar.
+
+### `POST /api/dividendos-me/income/monthly/preview`
+Body: `{ "email": "...", "password": "...", "portfolio_id": 1 }`.
+→ `IncomeMonthlySyncPreview` (histórico mensal agregado de proventos).
+
+### `POST /api/dividendos-me/income/monthly/import`
+Mesmo body do preview.
+→ `IncomeMonthlySyncRunResult` — importação sempre aditiva, com dedup
+automático em reimportações.
+
+### `POST /api/dividendos-me/income/calendar/preview`
+Body: `{ "email": "...", "password": "...", "portfolio_id": 1 }`.
+→ `IncomeSyncPreview` (calendário futuro de proventos).
+
+### `POST /api/dividendos-me/income/calendar/import`
+Mesmo body do preview.
+→ `IncomeSyncRunResult` — importação sempre aditiva, com dedup
+automático.
+
+Todas as rotas mapeiam `DividendosMeAuthError` → 401,
+`DividendosMeScrapingError` (inclui "Playwright não instalado") → 503,
+`PortfolioNotFoundError` → 404,
+`SyncConfirmationRequiredError`/`ExtractionInvalidError` → 422,
+qualquer exceção não prevista → 500 com mensagem genérica (nunca vaza
+detalhe — toda mensagem passa por `sanitize_message()` antes de virar
+resposta HTTP, defesa em profundidade caso alguma lib de terceiro ecoe
+a senha por engano).
 
 ## Sistema
 
@@ -207,11 +335,3 @@ CLI) — dispara um backup do banco atual.
 ### `GET /api/system/status`
 Healthcheck: versão da API, conectividade com o banco, ambiente
 (`ENVIRONMENT`), sem nenhum dado sensível.
-
-## O que fica fora deste contrato inicial
-
-Journal (endpoints de CRUD simples, a detalhar na Fase 5 — não estava
-na lista de endpoints do brief original) e a granularidade exata de
-`PATCH /api/settings/*` (a tela de Configurações é a mais complexa em
-formulários; melhor fechar o contrato quando a Fase 5 começar de fato,
-com o schema real na tela).

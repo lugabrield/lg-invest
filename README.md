@@ -4,9 +4,16 @@
 
 A LG INVEST não é uma planilha nem um clone de Status Invest. O objetivo é responder perguntas de decisão: **qual é o valor real da minha carteira, onde devo aportar o próximo dinheiro, por quê, com qual nível de confiança, e como isso muda a composição da carteira.**
 
-> **Status atual: v1.0.0 — app local estável, pronto para uso diário.**
+> **Status atual: v1.0.0 (Streamlit) — app local estável, pronto para uso diário, na branch `main`.**
 > Ver `docs/RELEASE_NOTES_v1.0.md` para o resumo completo da versão e
 > `docs/RELEASE_CHECKLIST.md` para os 24 critérios de prontidão verificados.
+>
+> **v1.1.0-rc1 (Next.js + FastAPI) — Release Candidate em revisão**, na
+> branch `feature/v1.1-premium-web-app` (ainda não mesclada em `main`).
+> Reescreve a interface em Next.js com um backend FastAPI, mantendo todas
+> as engines, regras de negócio e o Streamlit desta branch `main`
+> intactos como fallback. Ver `docs/RELEASE_NOTES_v1.1.md` e
+> `docs/V1_1_RC_CHECKLIST.md`.
 
 ## O que a LG INVEST faz
 
@@ -143,4 +150,6 @@ A LG INVEST é uma ferramenta pessoal de organização e análise, **não é uma
 - `docs/INVESTMENT_DECISION_SYSTEM.md`, `docs/DECISION_ENGINE_3.md`, `docs/POST_ALLOCATION_CONSTRAINTS.md` — como o Decision Engine decide
 - `docs/DATA_REFRESH_CENTER.md`, `docs/DATA_COVERAGE_REPORT.md` — atualização e qualidade de dados
 - `docs/WATCHLIST_RADAR.md` — Radar/Watchlist
+- `docs/RELEASE_NOTES_v1.1.md`, `docs/V1_1_RC_CHECKLIST.md` — v1.1 (Next.js + FastAPI), Release Candidate
+- `docs/WEB_APP_ARCHITECTURE.md`, `docs/API_CONTRACT.md`, `docs/VERCEL_DEPLOYMENT.md` — arquitetura, contrato de API e deploy da v1.1
 - `CHANGELOG.md` — histórico completo de mudanças
