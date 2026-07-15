@@ -1658,3 +1658,308 @@ export async function resetSimulationAssumption(
   );
   return _handleJsonResponseConfig<SimulationAssumptionsView>(response);
 }
+
+// --- Dividendos.me (v1.1, Fase 11) — espelha 1:1
+// backend/app/schemas/dividendos_me_bundle.py e
+// backend/app/integrations/dividendos_me/schemas.py. Credenciais vão no
+// body de CADA chamada (nunca um "token de sessão") e nunca são
+// persistidas em nenhum storage do navegador — só em memória do
+// componente React enquanto a tela está aberta. Ver
+// docs/DIVIDENDOS_ME_FRONT_SYNC.md e docs/SECURITY_NOTES.md.
+
+export interface SectionDiagnosticsView {
+  section: string;
+  selector_used: string;
+  raw_rows_detected: number;
+  valid_rows: number;
+  rejected_rows: number;
+  rejection_reasons: string[];
+  navigation_detail: string | null;
+  final_url: string | null;
+  tabs_found: string[];
+  wallet_selectors_found: string[];
+  table_elements_found: number;
+  canvas_or_svg_detected: boolean;
+}
+
+export interface SyncDiffView {
+  kept: string[];
+  updated: string[];
+  created: string[];
+  missing_in_source: string[];
+}
+
+export interface ExtractedPositionView {
+  raw_ticker: string;
+  name: string | null;
+  ticker: string;
+  asset_class: string;
+  country: string;
+  currency: string;
+  is_manual: boolean;
+  review_required: boolean;
+  review_reason: string | null;
+  section: string | null;
+  quantity: string;
+  average_price: string | null;
+  current_price: string | null;
+  current_value: string | null;
+  return_pct: string | null;
+  daily_change_pct: string | null;
+  dividend_yield_pct: string | null;
+  v_vp: string | null;
+  origin: string;
+  synced_at: string;
+}
+
+export interface SyncPreviewView {
+  portfolio_id: number;
+  total_patrimonio: string;
+  total_patrimonio_status: string;
+  total_assets: number;
+  positions: ExtractedPositionView[];
+  diff: SyncDiffView;
+  status: string;
+  sections_expected: string[];
+  sections_failed: string[];
+  review_required_tickers: string[];
+  diagnostics: SectionDiagnosticsView[];
+  generated_at: string;
+}
+
+export interface SyncRunResultView {
+  run_id: number | null;
+  provider: string;
+  mode: string;
+  status: string;
+  portfolio_id: number;
+  assets_found: number;
+  positions_created: number;
+  positions_updated: number;
+  positions_removed: number;
+  errors: string[];
+  started_at: string;
+  finished_at: string | null;
+  preview: SyncPreviewView | null;
+}
+
+export interface DryRunResponse {
+  preview: SyncPreviewView;
+  blocking_reasons_replace: string[];
+  blocking_reasons_update: string[];
+  strong_alert_sections: string[];
+}
+
+export interface DividendosMeStatusView {
+  playwright_available: boolean;
+  last_sync_at: string | null;
+  last_sync_status: string | null;
+}
+
+export interface TestLoginResponse {
+  success: boolean;
+}
+
+export interface IncomeEventPreviewItemView {
+  ticker: string | null;
+  event_type: string;
+  status: string;
+  payment_date: string | null;
+  amount_total: string;
+  currency: string;
+  source: string;
+}
+
+export interface IncomeSyncPreviewView {
+  portfolio_id: number;
+  events_found: number;
+  events_valid: number;
+  events_rejected: number;
+  period_start: string | null;
+  period_end: string | null;
+  total_by_currency: Record<string, string>;
+  sections_failed: string[];
+  diagnostics: SectionDiagnosticsView[];
+  sample: IncomeEventPreviewItemView[];
+  generated_at: string;
+}
+
+export interface IncomeSyncRunResultView {
+  provider: string;
+  status: string;
+  portfolio_id: number;
+  events_found: number;
+  events_created: number;
+  events_skipped_duplicate: number;
+  errors: string[];
+  started_at: string;
+  finished_at: string | null;
+  preview: IncomeSyncPreviewView | null;
+}
+
+export interface IncomeMonthlySummaryPreviewItemView {
+  wallet_name: string;
+  year: number;
+  month: number;
+  amount_total: string;
+  currency: string;
+  status: string;
+  annual_total: string | null;
+  annual_average: string | null;
+}
+
+export interface IncomeMonthlySyncPreviewView {
+  portfolio_id: number;
+  summaries_found: number;
+  summaries_valid: number;
+  summaries_rejected: number;
+  years_found: number[];
+  months_found: number[];
+  wallets_found: string[];
+  total_by_year: Record<string, string>;
+  total_by_currency: Record<string, string>;
+  sections_failed: string[];
+  diagnostics: SectionDiagnosticsView[];
+  sample: IncomeMonthlySummaryPreviewItemView[];
+  generated_at: string;
+}
+
+export interface IncomeMonthlySyncRunResultView {
+  provider: string;
+  status: string;
+  portfolio_id: number;
+  summaries_found: number;
+  summaries_created: number;
+  summaries_skipped_duplicate: number;
+  errors: string[];
+  started_at: string;
+  finished_at: string | null;
+  preview: IncomeMonthlySyncPreviewView | null;
+}
+
+export interface DividendosMeCredentialsPayload {
+  email: string;
+  password: string;
+}
+
+export interface DividendosMeSyncPayload extends DividendosMeCredentialsPayload {
+  portfolio_id?: number;
+}
+
+export interface SyncUpdatePayload extends DividendosMeSyncPayload {
+  confirm: boolean;
+}
+
+export interface SyncReplacePayload extends DividendosMeSyncPayload {
+  confirmation_phrase: string;
+}
+
+async function _handleJsonResponseDividendosMe<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // resposta sem corpo JSON — usa o statusText mesmo
+    }
+    throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), response.status);
+  }
+  return response.json();
+}
+
+export async function fetchDividendosMeStatus(portfolioId = 1): Promise<DividendosMeStatusView> {
+  const response = await fetch(
+    `${API_URL}/api/dividendos-me/status?portfolio_id=${portfolioId}`,
+    { cache: "no-store" },
+  );
+  return _handleJsonResponseDividendosMe<DividendosMeStatusView>(response);
+}
+
+export async function testDividendosMeLogin(
+  payload: DividendosMeCredentialsPayload,
+): Promise<TestLoginResponse> {
+  const response = await fetch(`${API_URL}/api/dividendos-me/test-login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseDividendosMe<TestLoginResponse>(response);
+}
+
+export async function dryRunDividendosMe(
+  payload: DividendosMeSyncPayload,
+): Promise<DryRunResponse> {
+  const response = await fetch(`${API_URL}/api/dividendos-me/dry-run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseDividendosMe<DryRunResponse>(response);
+}
+
+export async function syncUpdateDividendosMe(
+  payload: SyncUpdatePayload,
+): Promise<SyncRunResultView> {
+  const response = await fetch(`${API_URL}/api/dividendos-me/sync-update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseDividendosMe<SyncRunResultView>(response);
+}
+
+export async function syncReplaceDividendosMe(
+  payload: SyncReplacePayload,
+): Promise<SyncRunResultView> {
+  const response = await fetch(`${API_URL}/api/dividendos-me/sync-replace`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseDividendosMe<SyncRunResultView>(response);
+}
+
+export async function fetchIncomeMonthlyPreview(
+  payload: DividendosMeSyncPayload,
+): Promise<IncomeMonthlySyncPreviewView> {
+  const response = await fetch(`${API_URL}/api/dividendos-me/income/monthly/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseDividendosMe<IncomeMonthlySyncPreviewView>(response);
+}
+
+export async function importIncomeMonthly(
+  payload: DividendosMeSyncPayload,
+): Promise<IncomeMonthlySyncRunResultView> {
+  const response = await fetch(`${API_URL}/api/dividendos-me/income/monthly/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseDividendosMe<IncomeMonthlySyncRunResultView>(response);
+}
+
+export async function fetchIncomeCalendarPreview(
+  payload: DividendosMeSyncPayload,
+): Promise<IncomeSyncPreviewView> {
+  const response = await fetch(`${API_URL}/api/dividendos-me/income/calendar/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseDividendosMe<IncomeSyncPreviewView>(response);
+}
+
+export async function importIncomeCalendar(
+  payload: DividendosMeSyncPayload,
+): Promise<IncomeSyncRunResultView> {
+  const response = await fetch(`${API_URL}/api/dividendos-me/income/calendar/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return _handleJsonResponseDividendosMe<IncomeSyncRunResultView>(response);
+}

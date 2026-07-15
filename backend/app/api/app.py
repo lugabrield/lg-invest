@@ -22,6 +22,7 @@ from backend.app.api.routes import (
     ativos,
     configuracoes,
     dashboard,
+    dividendos_me,
     intelligence,
     journal,
     portfolio,
@@ -55,3 +56,4 @@ app.include_router(radar.router, prefix="/api")
 app.include_router(simulacao.router, prefix="/api")
 app.include_router(journal.router, prefix="/api")
 app.include_router(configuracoes.router, prefix="/api")
+app.include_router(dividendos_me.router, prefix="/api")
