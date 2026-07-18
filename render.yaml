@@ -1,0 +1,35 @@
+# Render Blueprint — backend FastAPI da LG INVEST v1.1
+#
+# Como usar: no painel do Render, "New +" -> "Blueprint" -> conectar o
+# repositório GitHub (lugabrield/lg-invest) -> Render detecta este
+# arquivo automaticamente e propõe criar o serviço abaixo. Ver
+# docs/VERCEL_DEPLOYMENT.md para o passo a passo completo.
+#
+# Variáveis marcadas com "sync: false" precisam ser preenchidas
+# manualmente no painel do Render (nunca ficam neste arquivo, que é
+# versionado) — ver a lista completa em docs/VERCEL_DEPLOYMENT.md.
+
+services:
+  - type: web
+    name: lg-invest-api
+    runtime: python
+    plan: free
+    branch: feature/v1.1-premium-web-app
+    buildCommand: "pip install -e . && playwright install --with-deps chromium"
+    startCommand: "uvicorn backend.app.api.app:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /api/system/status
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: API_CORS_ORIGINS
+        sync: false
+      - key: YAHOO_FINANCE_ENABLED
+        value: "true"
+      - key: BCB_FX_ENABLED
+        value: "true"
+      - key: LOG_LEVEL
+        value: INFO
